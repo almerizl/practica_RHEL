@@ -1,0 +1,124 @@
+================================================================================
+REPORTE DE LABORATORIO: PRÁCTICAS 1 A 4 (RHEL)
+Estudiante: Cris Almeris Zanellato Lorenzo
+Matrícula: 2025-2285
+Materia: Sistemas Operativos 3
+================================================================================
+
+================================================================================
+PRÁCTICA 1: INSTALACIÓN DEL SISTEMA OPERATIVO RED HAT (RHEL 9)
+================================================================================
+
+1. REQUISITOS MÍNIMOS OFICIALES (Red Hat Enterprise Linux 9):
+   - Procesador: CPU de 64 bits (x86_64, ARM64, IBM Power, o IBM Z).
+   - Memoria RAM: Mínimo 1.5 GB por núcleo de CPU (Se recomiendan 2 GB o más).
+   - Espacio en Disco: Mínimo 10 GB de espacio libre (Se recomiendan 20 GB).
+
+2. RECURSOS ASIGNADOS A LA MÁQUINA VIRTUAL:
+   - Procesador: 2 vCPUs
+   - Memoria RAM: 4 GB
+   - Disco Duro: 20 GB (Almacenamiento Dinámico)
+   - Adaptador de Red: Configurado en modo "Bridge" (Adaptador Puente) para 
+     permitir que la VM tome una IP directa de la red física local.
+
+3. PROCESO DE INSTALACIÓN:
+   - Montaje de la ISO oficial de RHEL 9 en el hipervisor.
+   - Configuración del idioma, distribución de teclado y zona horaria.
+   - Selección de software: Servidor con Interfaz Gráfica (GUI).
+   - Creación del destino de instalación (Particionado automático).
+   - Configuración de la cuenta "root" y creación del usuario inicial.
+
+================================================================================
+PRÁCTICA 2: CONFIGURACIÓN DE PARÁMETROS DE RED
+================================================================================
+* NOTA: La interfaz física del sistema se identifica en esta VM como 'ens160'.
+
+--- FORMA 1: LÍNEA DE COMANDOS (nmcli) ---
+
+A) Configuración por DHCP (Modo Automático):
+# Comando para cambiar el método a automático y limpiar parámetros previos
+nmcli connection modify ens160 ipv4.method auto ipv4.addresses "" ipv4.gateway "" ipv4.dns ""
+# Comando para levantar la interfaz y aplicar cambios
+nmcli connection up ens160
+
+B) Configuración por IP Estática y DNS de Google (Modo Manual):
+# Asignación manual de IP, Máscara (/24), Gateway y DNS (8.8.8.8 y 8.8.4.4)
+nmcli connection modify ens160 ipv4.method manual ipv4.addresses 192.168.1.150/24 ipv4.gateway 192.168.1.1 ipv4.dns "8.8.8.8 8.8.4.4"
+# Aplicación de cambios levantando la interfaz
+nmcli connection up ens160
+
+--- FORMA 2: INTERFAZ VISUAL EN TERMINAL (nmtui) ---
+# Comando para abrir el menú interactivo pseudo-gráfico de red:
+nmtui
+# Pasos realizados:
+# 1. Selección de "Edit a connection" -> Interfaz 'ens160'.
+# 2. Cambio de IPv4 CONFIGURATION de <Automatic> a <Manual>.
+# 3. Campos rellenados: Address (192.168.1.150/24), Gateway (192.168.1.1), DNS (8.8.8.8 y 8.8.4.4).
+# 4. Guardado del perfil y reactivación mediante la sección "Activate a connection".
+
+--- FORMA 3: ARCHIVOS DE CONFIGURACIÓN DIRECTOS (Keyfiles) ---
+# Ruta oficial en RHEL 9: /etc/NetworkManager/system-connections/ens160.nmconnection
+# Comando para editar el archivo de configuración con permisos elevados:
+sudo nano /etc/NetworkManager/system-connections/ens160.nmconnection
+
+# Configuración del bloque [ipv4] modificado para IP Estática:
+[ipv4]
+method=manual
+address1=192.168.1.150/24,192.168.1.1
+dns=8.8.8.8;8.8.4.4;
+
+# Comandos para recargar NetworkManager y aplicar los cambios del archivo:
+sudo nmcli connection reload
+nmcli connection up ens160
+
+--- COMANDOS DE VERIFICACIÓN DE RED ---
+ip addr show ens160   # Verifica la IP asignada
+ip route show         # Verifica la tabla de enrutamiento y gateway por defecto
+cat /etc/resolv.conf  # Verifica los servidores DNS globales activos
+
+================================================================================
+PRÁCTICA 3: GESTIÓN DE USUARIOS Y GRUPOS
+================================================================================
+* NOTA: Todos los comandos requieren elevación de privilegios root (sudo -i).
+
+1. Crear un usuario con mi nombre y añadirlo al grupo administrativo:
+useradd almeris
+passwd almeris
+usermod -aG wheel almeris   # Otorga privilegios de superusuario mediante sudo
+
+2. Crear grupo "guest", un usuario nuevo y añadirlo como grupo primario:
+groupadd guest
+useradd -g guest invitado   # El parámetro -g asigna el grupo primario de inicio
+
+3. Eliminación y limpieza de los elementos de prueba creados:
+userdel -r invitado         # El parámetro -r elimina su directorio /home
+groupdel guest              # Elimina el grupo una vez desvinculado del usuario
+
+--- COMANDOS DE VERIFICACIÓN ---
+id almeris   # Muestra la existencia del usuario y su pertenencia al grupo wheel
+id invitado  # Debe retornar 'no such user' comprobando su correcta eliminación
+
+================================================================================
+PRÁCTICA 4: GESTIÓN DE PERMISOS DE ARCHIVOS
+================================================================================
+
+1. Creación de estructura y edición con editor 'vi':
+mkdir materia
+vi materia/estudiante.almeris  # [Comandos en vi: 'i' para insertar texto, 'Esc' + ':wq' para guardar]
+
+2. Modificación de permisos (Formato Octal):
+# Requerimiento A: Control total (rwx) SOLO para el usuario propietario (700)
+chmod 700 materia/estudiante.almeris
+
+# Requerimiento B: Control total (rwx) SOLO para el grupo propietario (070)
+chmod 070 materia/estudiante.almeris
+
+3. Duplicación de archivos y eliminación recursiva:
+mkdir materia2
+cp materia/estudiante.almeris materia2/   # Copia el archivo preservando los datos
+rm -rf materia                        # Eliminación recursiva y forzada de la carpeta original
+
+--- COMANDOS DE VERIFICACIÓN ---
+ls -l materia2/   # Comprueba los permisos (---rwx---) y la existencia del clon
+ls -l             # Comprueba que la carpeta 'materia' fue eliminada por completo
+================================================================================
