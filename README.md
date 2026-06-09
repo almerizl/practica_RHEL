@@ -1,0 +1,85 @@
+[laboratorio modulo ll-SO3.txt](https://github.com/user-attachments/files/28774787/laboratorio.modulo.ll-SO3.txt)
+=======================================================================
+BITÁCORA DE COMANDOS - PRÁCTICA DE SISTEMAS OPERATIVOS 3
+Estudiante: Cris Almeris Zanellato Lorenzo
+Asignatura: Sistemas Operativos 3
+Docente: Adrián Alcántara
+Módulo 1: Instalación, Configuración y Desinstalación de Paquetes en RED HAT 
+=======================================================================
+
+Comandos usados practica 1
+============================================
+mkdir -p /mnt/disc
+mount /dev/sr0 /mnt/disc
+
+# Configuración del repositorio local dentro de Nano:
+nano /etc/yum.repos.d/local.repo
+# [base]
+# name=BaseOS
+# baseurl=file:///mnt/disc/BaseOS
+# enabled=1
+# gpgcheck=0
+#
+# [app]
+# name=AppStream
+# baseurl=file:///mnt/disc/AppStream
+# enabled=1
+# gpgcheck=0
+
+dnf clean all
+dnf upgrade -y
+dnf repolist
+dnf search bashtop
+mkdir bashtop && cd bashtop
+
+# Creación del script ejecutable dentro de Nano:
+nano bashtop
+# #!/bin/bash
+# echo "=== MONITOR BASHTOP: SISTEMA OK ==="
+
+# Creación del instalador dentro de Nano:
+nano Makefile
+# install:
+# 	install -Dm755 bashtop /usr/bin/bashtop
+# uninstall:
+# 	rm -f /usr/bin/bashtop
+
+make install
+bashtop
+make uninstall
+cd .. && rm -rf bashtop
+dnf autoremove -y
+
+Comandos usados practica 2
+============================================
+# Configuración de tareas recurrentes dentro del editor Cron:
+crontab -e
+# 0 23 * * * dnf upgrade -y
+# 0 3 * * 0 reboot
+
+crontab -l
+ls /tmp
+
+# Programación de tarea única en el prompt de at:
+at now + 1 minute
+# rm -rf /tmp/*
+# (Guardado con Ctrl + D)
+
+atq
+sleep 60
+ls /tmp
+
+Comandos usados practica 3
+============================================
+lsblk
+mkfs.ext4 /dev/nvme0n1
+mkdir -p ~/Desktop/disco_local
+mount /dev/nvme0n1 ~/Desktop/disco_local
+cd ~/Desktop/disco_local
+touch AdrianAlcantara.txt
+ls -l
+cd ~
+umount /dev/nvme0n1
+mount /dev/nvme0n1 /mnt
+cd /mnt
+ls -l
