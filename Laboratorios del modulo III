@@ -1,0 +1,67 @@
+=======================================================================
+BITÁCORA DE COMANDOS - PRÁCTICA DE SISTEMAS OPERATIVOS 3
+Estudiante: Cris Almeris Zanellato Lorenzo
+Asignatura: Sistemas Operativos 3
+Docente: Adrián Alcántara
+PRACTICA 2: Configuración de GRUB, Scripting y Acceso SSH mediante Llaves
+=======================================================================
+
+Comandos usados practica 1
+============================================
+# Configuración del tiempo de espera dentro de Nano:
+nano /etc/default/grub
+# GRUB_TIMEOUT=20
+
+sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+sudo reboot
+
+# [EXPLICACIÓN]: Método de recuperación de contraseña de root:
+# 1. Al reiniciar la VM, presionar la tecla "e" en el menú de GRUB.
+# 2. Ir al final de la línea que empieza con "linux" y escribir: init=/bin/sh
+# 3. Presionar Ctrl + X para arrancar en la consola de emergencia.
+
+mount -o remount,rw /
+passwd root
+touch /.autorelabel
+exec /sbin/init
+
+Comandos usados practica 2
+============================================
+# Creación del script de backup comprimido dentro de Nano:
+nano backup.sh
+# #!/bin/bash
+# fecha=$(date +"%d-%m-%Y:%H:%M")
+# tar -czf backup_$fecha.tar.gz /home/cris
+# echo "backup creado correctamente: backup_$fecha.tar.gz"
+
+chmod +x backup.sh
+./backup.sh
+ls
+
+# Creación del script interactivo de red dentro de Nano:
+nano ifconfig.sh
+# #!/bin/bash
+# echo "Ingrese el nombre del archivo: "
+# read nombre
+# ifconfig > $HOME/Desktop/$nombre.txt
+# echo "archivo creado correctamente."
+
+chmod +x ifconfig.sh
+./ifconfig.sh
+ls $HOME/Desktop/
+cat $HOME/Desktop/nombre_del_archivo.txt
+
+Comandos usados practica 3
+============================================
+# [Pasos ejecutados en la Máquina Host - Windows]
+ipconfig
+ping 192.168.86.200
+ssh alzzzzzc@192.168.86.200
+exit
+ssh-keygen -t rsa -b 4096
+
+# Transferencia automatizada de la llave pública desde PowerShell:
+cat $env:USERPROFILE\.ssh\id_rsa.pub | ssh alzzzzzc@192.168.86.200 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+
+# Prueba final de conexión directa (Entrada automática sin contraseña):
+ssh alzzzzzc@192.168.86.200
