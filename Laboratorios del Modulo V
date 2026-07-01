@@ -1,0 +1,125 @@
+PRÁCTICA DE SISTEMAS OPERATIVOS 3
+Estudiante: Cris Almeris Zanellato Lorenzo
+Asignatura: Sistemas Operativos 3
+Docente: Adrián Alcántara
+
+PRACTICA 1: Sincronización de carpetas con Rsync
+=======================================================================
+
+Comandos usados en la Máquina 1
+============================================
+# Crear una carpeta en su servidor primario:
+mkdir /root/datos_sincro
+
+# Dentro crear 100 archivos (con el comando touch):
+touch /root/datos_sincro/archivo{1..100}.txt
+
+#comando de sincronizacion de la carpeta:
+echo -e '#!/bin/bash\nrsync -avz --delete /root/datos_sincro/ alzzzzzc@192.168.124.133:/home/alzzzzzc/datos_sincro/' > /root/sincronizar.sh
+
+# Otorgar permisos de ejecución al script creado:
+chmod +x /root/sincronizar.sh
+
+# Programar el reloj (Crontab):
+crontab -e
+
+* * * * * /root/sincronizar.sh > /dev/null 2>&1
+
+# Crear el archivo de prueba
+touch /root/datos_sincro/archivo_prueba_cron.txt
+
+
+Comandos usados en la Máquina 2
+============================================
+# 1. Esperar 1 minuto para que se cumpla el ciclo del crontab del servidor primario.
+# 2. Validar en el servidor secundario si la carpeta se creo y recibió los archivos.
+
+ls /home/alzzzzzc/datos_sincro/
+
+
+PRACTICA 2: Alta Disponibilidad con Pacemaker y Corosync
+=======================================================================
+
+Comandos usados en la Máquina 1
+============================================
+# Asignar contraseña al usuario hacluster creado por el sistema:
+passwd hacluster
+
+# Habilitar e iniciar el servicio de configuración del clúster:
+systemctl enable --now pcsd
+
+# Autenticar los nodos del clúster (Ejecutar solo en Máquina 1):
+pcs host auth nodo1 nodo2 -u hacluster
+
+# Crear y configurar el clúster (Ejecutar solo en Máquina 1):
+pcs cluster setup mi_cluster nodo1 nodo2 --force
+
+# Iniciar y habilitar todos los servicios del clúster en la red:
+pcs cluster start --all
+pcs cluster enable --all
+
+# Deshabilitar el mecanismo STONITH (ya que no tenemos hardware de esgrima):
+pcs property set stonith-enabled=false
+
+# Ignorar la política de Quórum (necesaria para clústeres de solo 2 nodos):
+pcs property set no-quorum-policy=ignore
+
+# Crear el recurso de la IP flotante del clúster:
+pcs resource create vip_cluster ocf:heartbeat:IPaddr2 ip=192.168.124.150 cidr_netmask=24 op monitor interval=30s
+
+# Validar el estado actual y los recursos del clúster:
+pcs status
+
+
+Comandos usados en la Máquina 2
+============================================
+# Asignar contraseña al usuario hacluster creado por el sistema:
+passwd hacluster
+
+# Habilitar e iniciar el servicio de configuración del clúster:
+systemctl enable --now pcsd
+
+
+PRACTICA 3: Alta Disponibilidad Web con Keepalived
+=======================================================================
+
+Comandos usados en la Máquina 1
+============================================
+# Personalizar la página web del Servidor 1 en los Virtual Hosts:
+echo "<h1>Bienvenidos a: Server 1</h1>" > /var/www/html/sitio80/index.html
+
+# Dentro crear la misma configuracion en el puerto 8080:
+echo "<h1>Bienvenidos a: Server 1</h1>" > /var/www/html/sitio8080/index.html
+
+# Reiniciar Apache para aplicar el cambio de página web:
+systemctl restart httpd
+
+# Inyectar la configuración limpia de Keepalived en modo MASTER con prioridad 100:
+echo -e "global_defs {\n    router_id nodo1\n}\n\nvrrp_instance VI_1 {\n    state MASTER\n    interface ens160\n    virtual_router_id 51\n    priority 100\n    advert_int 1\n    authentication {\n        auth_type PASS\n        auth_pass 1234\n    }\n    virtual_ipaddress {\n        192.168.124.180/24\n    }\n}" > /etc/keepalived/keepalived.conf
+
+# Habilitar e iniciar el servicio Keepalived:
+systemctl enable --now keepalived
+
+# Verificar que el servicio esté activo y comprobar la IP flotante:
+systemctl status keepalived
+
+
+Comandos usados en la Máquina 2
+============================================
+# Personalizar la página web del Servidor 2 en los Virtual Hosts:
+echo "<h1>Bienvenidos a: Server 2</h1>" > /var/www/html/sitio80/index.html
+
+# Dentro crear la misma configuracion en el puerto 8080:
+echo "<h1>Bienvenidos a: Server 2</h1>" > /var/www/html/sitio8080/index.html
+
+# Reiniciar Apache para aplicar el cambio de página web:
+systemctl restart httpd
+
+# Inyectar la configuración limpia de Keepalived en modo BACKUP con prioridad 90:
+echo -e "global_defs {\n    router_id nodo2\n}\n\nvrrp_instance VI_1 {\n    state BACKUP\n    interface ens192\n    virtual_router_id 51\n    priority 90\n    advert_int 1\n    authentication {\n        auth_type PASS\n        auth_pass 1234\n    }\n    virtual_ipaddress {\n        192.168.124.180/24\n    }\n}" > /etc/keepalived/keepalived.conf
+
+# Habilitar e iniciar el servicio Keepalived:
+systemctl enable --now keepalived
+
+# Verificar el estado correcto del servicio de respaldo:
+systemctl status keepalived
