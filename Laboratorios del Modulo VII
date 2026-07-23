@@ -1,0 +1,232 @@
+================================================================================
+REPORTE DE LABORATORIO: laboratorio modulo VII
+Estudiante: Cris Almeris Zanellato Lorenzo
+Matrícula: 2025-2285
+Materia: Sistemas Operativos 3
+================================================================================
+
+================================================================================
+PRÁCTICA 1: CONFIGURACIÓN DE SERVIDOR NFS Y CLIENTE EN RED
+================================================================================
+CONFIGURACIÓN EN EL SERVIDOR (nodo1)
+--------------------------------------------------------------------------------
+
+COMANDOS EJECUTADOS:
+
+# Crear directorio y generar 100 archivos requeridos
+mkdir -p /OS3
+touch /OS3/Adrian{1..100}.txt
+
+# Asignar permisos y propietario
+chmod -R 777 /OS3
+chown -R nobody:nobody /OS3
+
+# Configurar la regla de exportación en el archivo /etc/exports
+echo "/OS3    192.168.124.0/24(rw,sync,no_subtree_check)" > /etc/exports
+
+# Aplicar las exportaciones en el sistema
+exportfs -arv
+
+# Habilitar reglas necesarias en el Firewall
+firewall-cmd --permanent --add-service=nfs
+firewall-cmd --permanent --add-service=rpc-bind
+firewall-cmd --permanent --add-service=mountd
+firewall-cmd --reload
+
+# Activar e iniciar los servicios de soporte RPC y NFS
+systemctl enable --now nfs-server rpcbind
+systemctl restart nfs-server
+
+COMPROBACIÓN:
+
+- Verificación de exportación en el servidor:
+    exportfs -v
+
+  Salida esperada:
+    /OS3    192.168.124.0/24(sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,root_squash,no_all_squash)
+
+
+================================================================================
+CONFIGURACIÓN EN EL CLIENTE (nodo2)
+================================================================================
+COMANDOS EJECUTADOS:
+
+# Crear el punto de montaje local
+mkdir -p /mnt/OS3_cliente
+
+# Consultar los recursos compartidos disponibles en el servidor
+showmount -e 192.168.124.10
+
+# Realizar el montaje manual especificando la versión 3 de NFS
+mount -t nfs -o vers=3 192.168.124.10:/OS3 /mnt/OS3_cliente
+
+# Comprobar la lectura de los 100 archivos en el cliente
+ls /mnt/OS3_cliente
+
+# Configurar automontaje persistente en el archivo /etc/fstab
+echo "192.168.124.10:/OS3   /mnt/OS3_cliente   nfs   defaults,vers=3,_netdev   0   0" >> /etc/fstab
+
+COMPROBACIÓN:
+
+- Probar montaje de la entrada en /etc/fstab:
+    mount -a
+
+- Verificar el punto de montaje cargado y el espacio asignado:
+    df -h /mnt/OS3_cliente
+
+- Confirmar que tras reiniciar la máquina cliente (reboot), el recurso se monta automáticamente:
+    ls /mnt/OS3_cliente
+================================================================================
+PRÁCTICA 2: FILE SERVER COMPATIBLE CON WINDOWS UTILIZANDO SAMBA
+================================================================================
+CONFIGURACIÓN EN EL SERVIDOR (nodo1)
+================================================================================
+COMANDOS EJECUTADOS:
+
+# 1. Instalación de Samba y paquetes de soporte
+dnf install samba samba-client samba-common -y
+
+# 2. Habilitar e iniciar los servicios de Samba (smb y nmb)
+systemctl enable --now smb nmb
+
+# 3. Crear el directorio compartido personal y generar los 100 archivos requeridos
+mkdir -p /srv/samba/cris
+touch /srv/samba/cris/Cris{1..100}.txt
+
+# 4. Asignar permisos y propietario al recurso compartido
+chmod -R 777 /srv/samba/cris
+chown -R nobody:nobody /srv/samba/cris
+
+# 5. Configurar el contexto de SELinux para permitir compartir archivos mediante Samba
+chcon -t samba_share_t /srv/samba/cris
+
+# 6. Habilitar las reglas necesarias en el Firewall
+firewall-cmd --permanent --add-service=samba
+firewall-cmd --reload
+
+# 7. Configuración del recurso compartido en /etc/samba/smb.conf
+# Se añade al final del archivo el siguiente bloque:
+# [cris]
+#    path = /srv/samba/cris
+#    browsable = yes
+#    writable = yes
+#    guest ok = yes
+#    read only = no
+
+# 8. Creación del grupo y del usuario asignado para Samba
+groupadd samba_users
+useradd -m cris
+usermod -aG samba_users cris
+
+# 9. Asignar contraseña de acceso a Samba para el usuario Pablo (Contraseña: 12345)
+smbpasswd -a cris
+
+# 10. Reiniciar los servicios para aplicar todos los cambios de configuración
+systemctl restart smb nmb
+
+COMPROBACIÓN EN EL SERVIDOR:
+
+- Verificar que el usuario Pablo pertenece al grupo 'samba_users':
+    groups cris
+
+  Salida esperada:
+    Pablo : cris samba_users
+
+- Comprobar la sintaxis del archivo de configuración de Samba:
+    testparm
+
+
+================================================================================
+VERIFICACIÓN Y ACCESO DESDE EL CLIENTE (Windows / Linux)
+================================================================================
+DESDE WINDOWS (Conexión por Red):
+
+Introducir la ruta de red UNC apuntando al Servidor:
+    \\192.168.124.10\cris
+
+Autenticarse con las credenciales creadas:
+    Usuario y Contraseña 
+================================================================================
+PRÁCTICA 3: CREACIÓN DE CONTROLADOR DE DOMINIO SAMBA 4 Y CLIENTE WINDOWS
+================================================================================
+CONFIGURACIÓN EN EL SERVIDOR CONTROLADOR DE DOMINIO (nodo1 / Linux)
+================================================================================
+COMANDOS EJECUTADOS:
+
+# 1. Configurar Hostname del Servidor al dominio requerido
+hostnamectl set-hostname so3.inet
+
+# 2. Configuración de red y resolución DNS en /etc/hosts
+echo "192.168.124.10 so3.inet inet" >> /etc/hosts
+
+# 3. Descarga y extracción de los fuentes de Samba 4 (Versión 4.16.2)
+mkdir -p /root/samba_build && cd /root/samba_build
+wget https://download.samba.org/pub/samba/stable/samba-4.16.2.tar.gz
+tar -zxvf samba-4.16.2.tar.gz
+cd samba-4.16.2
+
+# 4. Habilitar repositorios de desarrollo e instalar dependencias compilatorias
+dnf install epel-release -y
+dnf config-manager --set-enabled crb
+dnf install gcc make python3-devel gnutls-devel docbook-style-xsl libacl-devel openldap-devel bind-utils -y
+
+# 5. Compilación e instalación de Samba 4 Active Directory
+./configure
+make -j2
+make -j2 install
+
+# 6. Configurar variables de entorno PATH en /etc/profile
+echo "export PATH=/usr/local/samba/bin:/usr/local/samba/sbin:\$PATH" >> /etc/profile
+source /etc/profile
+
+# 7. Aprovisionamiento del Dominio Active Directory (Samba AD DC)
+# Nota: La contraseña del administrador se ingresa de forma interactiva
+samba-tool domain provision \
+  --realm=SO3.INET \
+  --domain=SO3 \
+  --server-role=dc \
+  --dns-backend=SAMBA_INTERNAL
+
+# 8. Iniciar el servicio del Controlador de Dominio
+/usr/local/samba/sbin/samba
+
+# 9. Reglas de cortafuegos (IPtables / Firewall) para servicios AD (DNS, Kerberos, LDAP, SMB)
+systemctl stop firewalld
+systemctl disable firewalld
+dnf install iptables-services -y
+systemctl enable --now iptables
+
+iptables -A INPUT -p tcp -m multiport --dports 53,88,135,139,389,445,464,636,3268,3269 -j ACCEPT
+iptables -A INPUT -p udp -m multiport --dports 53,88,123,137,138,389,464 -j ACCEPT
+service iptables save
+
+COMPROBACIÓN EN EL SERVIDOR:
+
+- Prueba de resolución interna y registros Kerberos del Dominio:
+    host -t SRV _ldap._tcp.so3.inet
+    host -t SRV _kerberos._udp.so3.inet
+    ping so3.inet
+================================================================================
+UNIÓN Y VERIFICACIÓN DESDE EL CLIENTE WINDOWS
+================================================================================
+PASOS REALIZADOS EN CLIENTE WINDOWS:
+
+1. Configuración de Red TCP/IPv4 en Windows:
+    - Dirección IP: Asignada por la red
+    - Servidor DNS Preferido: IP del Controlador de Dominio Linux
+    - Servidor DNS Alternativo: 8.8.8.8
+
+2. Comprobación de comunicación desde la Consola CMD de Windows:
+    ping so3.inet
+
+3. Unión al Dominio Active Directory:
+    - Ruta: Configuración -> Acerca de -> Configuración avanzada del sistema -> Nombre de equipo -> ID de Red / Cambiar.
+    - Seleccionar: 'Miembro del dominio'.
+    - Nombre del Dominio: so3.inet
+    - Autenticación:
+        Usuario: Administrator
+        Contraseña: 
+
+4. Reiniciar la máquina Windows y validar el inicio de sesión con el usuario del dominio:
+    Dominio: SO3\Administrator
+================================================================================
