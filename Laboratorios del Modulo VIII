@@ -1,0 +1,136 @@
+================================================================================
+REPORTE DE LABORATORIO: laboratorio modulo VIII
+Estudiante: Cris Almeris Zanellato Lorenzo
+Matrícula: 2025-2285
+Materia: Sistemas Operativos 3
+================================================================================
+PRÁCTICA 1: INSTALACIÓN Y CONFIGURACIÓN DE DOCKER
+================================================================================
+CONFIGURACIÓN EN EL SERVIDOR (RHEL)
+================================================================================
+COMANDOS EJECUTADOS:
+
+# 1. Instalar dependencias para la gestión de repositorios
+sudo dnf install -y dnf-utils
+
+# 2. Agregar el repositorio oficial de Docker CE para RHEL
+sudo dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+
+# 3. Instalar Docker Engine y plugins requeridos
+sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# 4. Habilitar e iniciar el servicio de Docker de forma permanente
+sudo systemctl enable --now docker
+
+# 5. Descargar la imagen oficial de NGINX desde Docker Hub
+sudo docker pull nginx
+
+# 6. Crear el directorio local para el volumen persistente
+sudo mkdir -p /home/website
+
+# 7. Crear y desplegar el contenedor mapeando el puerto 8888 al 80 y aplicando contexto de SELinux (:Z)
+sudo docker run -d -p 8888:80 -v /home/website:/usr/share/nginx/html:Z --name mi_web nginx
+
+# 8. Crear la página HTML personalizada index.html en la ruta persistente
+cat << 'EOF' | sudo tee /home/website/index.html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Práctica 1 - Docker</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f9; }
+        .card { background: white; display: inline-block; padding: 20px 40px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        h1 { color: #333; }
+        p { color: #666; font-size: 1.2em; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>¡Práctica #1 Completada!</h1>
+        <p><strong>Nombre:</strong> Cris Almeris Zanellato Lorenzo</p>
+        <p><strong>Matrícula:</strong> 2025-2285</p>
+    </div>
+</body>
+</html>
+EOF
+
+================================================================================
+PRÁCTICA 2: INSTALACIÓN DE PORTAINER Y GESTIÓN DE CONTENEDORES
+================================================================================
+CONFIGURACIÓN EN EL SERVIDOR (RHEL)
+================================================================================
+
+COMANDOS EJECUTADOS:
+
+# 1. Crear el volumen persistente para almacenar la configuración de Portainer
+sudo docker volume create portainer_data
+
+# 2. Descargar la imagen y desplegar el contenedor de Portainer mapeando los puertos HTTPS (9443) y aplicando el contexto de SELinux (:Z)
+sudo docker run -d -p 8000:8000 -p 9443:9443 --name portainer --restart=always -v /var/run/docker.sock:/var/run/docker.sock:Z -v portainer_data:/data:Z portainer/portainer-ce:latest --no-setup-token
+
+- Configuración y vinculación en la interfaz de administración Web:
+    1. Acceder mediante el navegador a la dirección: https://127.0.0.1:9443
+    2. Establecer credenciales de usuario administrador (admin / contraseña).
+    3. Vincular el entorno con el Docker Engine (Local).
+
+- Verificación de la detención en el servicio Web:
+    curl http://127.0.0.1:8888
+
+================================================================================
+PRÁCTICA 3: DESPLIEGUE DE CONTENEDOR DE WORDPRESS UTILIZANDO DOCKER-COMPOSE
+================================================================================
+CONFIGURACIÓN EN EL SERVIDOR (RHEL)
+--------------------------------------------------------------------------------
+
+COMANDOS EJECUTADOS:
+
+# 1. Descarga del binario de Docker-Compose desde el repositorio oficial de GitHub
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+
+# 2. Asignación de permisos de ejecución al ejecutable de Docker-Compose
+sudo chmod +x /usr/local/bin/docker-compose
+
+# 3. Creación del directorio de trabajo e ingreso a la ruta del proyecto
+mkdir -p /home/wordpress_compose && cd /home/wordpress_compose
+
+# 4. Creación del archivo docker-compose.yml declarando servicios, variables de entorno y volúmenes
+cat << 'EOF' > docker-compose.yml
+version: '3.8'
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: wordpress_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password_123
+      MYSQL_DATABASE: wordpress_db
+      MYSQL_USER: wp_user
+      MYSQL_PASSWORD: wp_password_123
+    volumes:
+      - db_data:/var/lib/mysql:Z
+
+  wordpress:
+    image: wordpress:latest
+    container_name: wordpress_app
+    restart: always
+    depends_on:
+      - db
+    ports:
+      - "8080:80"
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wp_user
+      WORDPRESS_DB_PASSWORD: wp_password_123
+      WORDPRESS_DB_NAME: wordpress_db
+    volumes:
+      - wp_data:/var/www/html:Z
+
+volumes:
+  db_data:
+  wp_data:
+EOF
+
+# 5. Despliegue de los contenedores mediante Docker-Compose en segundo plano
+sudo docker-compose up -d2
