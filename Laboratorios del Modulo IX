@@ -1,0 +1,208 @@
+================================================================================
+REPORTE DE LABORATORIO: Laboratorios del Modulo IX
+Estudiante: Cris Almeris Zanellato Lorenzo
+Matrícula: 2025-2285
+Materia: Sistemas Operativos 3
+================================================================================
+PRÁCTICA 1: INSTALACIÓN Y CONFIGURACIÓN DE WEBMIN
+================================================================================
+CONFIGURACIÓN EN EL SERVIDOR (RHEL)
+================================================================================
+COMANDOS EJECUTADOS:
+
+1. Agregar el repositorio oficial de Webmin en RHEL
+cat << 'EOF' | sudo tee /etc/yum.repos.d/webmin.repo
+[Webmin]
+name=Webmin Distribution Neutral
+baseurl=https://download.webmin.com/download/yum
+enabled=1
+gpgcheck=1
+gpgkey=https://download.webmin.com/jcameron-key.asc
+EOF
+
+2. Instalar Webmin y sus dependencias
+sudo dnf install -y webmin
+
+3. Habilitar e iniciar el servicio de Webmin de forma permanente
+sudo systemctl enable --now webmin
+
+4. Permitir el puerto de administración de Webmin (10000) en el Firewall
+sudo firewall-cmd --add-port=10000/tcp --permanent
+sudo firewall-cmd --reload
+
+VERIFICACIÓN Y OPCIONES DE ADMINISTRACIÓN VÍA WEBMIN:
+1. Acceder mediante el navegador web a la dirección: https://<IP_RHEL>:10000
+2. Iniciar sesión con las credenciales del usuario administrador (root).
+3. Opciones de administración validadas en el panel de control:
+   - Administración de usuarios: Creación, edición y eliminación de cuentas del sistema.
+   - Gestión de servicios: Inicio, detención y reinicio de servicios clave del sistema (ej. SSHD, Firewall).
+   - Configuración de red: Asignación y ajuste de direcciones IP estáticas en las interfaces del sistema.
+   - Administración de software: Búsqueda, instalación, actualización y remoción de paquetes DNF/RPM.
+   - Gestión de archivos y directorios: Exploración, edición en línea y borrado de archivos del sistema.
+   - Monitorización del sistema: Supervisión en tiempo real del rendimiento del sistema (CPU, Memoria RAM y Almacenamiento).
+
+================================================================================
+PRÁCTICA 2: DESPLIEGUE DE UNA VM CON TERRAFORM EN DIGITALOCEAN
+================================================================================
+CONFIGURACIÓN EN EL SERVIDOR (RHEL)
+================================================================================
+COMANDOS EJECUTADOS:
+
+1. Instalar dependencias y agregar el repositorio oficial de HashiCorp Terraform
+sudo dnf install -y yum-utils
+sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo
+
+2. Instalar Terraform
+sudo dnf install -y terraform
+
+3. Crear el directorio de trabajo para la infraestructura como código
+mkdir -p /home/terraform_do && cd /home/terraform_do
+
+# 4. Generar par de llaves SSH en la máquina servidora (sin contraseña)
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+
+# 5. Crear el archivo de configuración main.tf de Terraform
+cat << 'EOF' > main.tf
+terraform {
+  required_providers {
+    digitalocean = {
+      source  = "digitalocean/digitalocean"
+      version = "~> 2.0"
+    }
+  }
+}
+
+provider "digitalocean" {
+  token = var.do_token
+}
+
+variable "do_token" {}
+
+resource "digitalocean_ssh_key" "default" {
+  name       = "ansible-controller-key"
+  public_key = file("~/.ssh/id_rsa.pub")
+}
+
+resource "digitalocean_droplet" "OS3vm" {
+  image    = "ubuntu-22-04-x64"
+  name     = "OS3vm"
+  region   = "nyc1"
+  size     = "s-1vcpu-1gb"
+  ssh_keys = [digitalocean_ssh_key.default.fingerprint]
+}
+
+output "ip_address" {
+  value = digitalocean_droplet.OS3vm.ipv4_address
+}
+EOF
+
+# 6. Inicializar y aplicar la configuración de Terraform
+terraform init
+terraform apply -var="do_token=TU_DIGITALOCEAN_API_TOKEN" -auto-approve
+
+# 7. Validar conexión SSH desde RHEL hacia la nueva VM de DigitalOcean
+ssh root@146.190.220.5
+
+================================================================================
+PRÁCTICA 3: INSTALACIÓN Y CONFIGURACIÓN DE ANSIBLE
+================================================================================
+CONFIGURACIÓN EN EL SERVIDOR CONTROLADOR (RHEL) Y CLIENTES
+================================================================================
+COMANDOS EJECUTADOS:
+
+# 1. Instalar Ansible y la librería pywinrm para la gestión de Windows
+sudo dnf install -y epel-release
+sudo dnf install -y ansible
+pip3 install pywinrm
+
+# 2. Crear usuario local 'ansible' con permisos de sudoers y generar llaves SSH
+sudo useradd -m ansible
+sudo echo "ansible ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/ansible
+sudo su - ansible -c "ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ''"
+
+# 3. Provisionar el usuario 'ansible' y transferir la llave SSH a la VM de DigitalOcean (Linux)
+cat /home/ansible/.ssh/id_rsa.pub | ssh root@146.190.220.5 "useradd -m ansible 2>/dev/null; echo 'ansible ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/ansible; mkdir -p /home/ansible/.ssh && cat >> /home/ansible/.ssh/authorized_keys && chown -R ansible:ansible /home/ansible/.ssh && chmod 700 /home/ansible/.ssh && chmod 600 /home/ansible/.ssh/authorized_keys"
+
+# 4. Configuración en la VM Windows (Cliente WinRM) vía PowerShell Administrador:
+# Enable-PSRemoting -Force
+# Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value true
+# Set-Item WSMan:\localhost\Service\Auth\Basic -Value true
+# New-NetFirewallRule -Name "WinRM-HTTP" -DisplayName "WinRM HTTP" -Protocol TCP -LocalPort 5985 -Action Allow
+# net user ansible password123* /add
+# net localgroup Administrators ansible /add
+
+5. Configurar el inventario de Ansible (/etc/ansible/hosts)
+sudo rm -rf /etc/ansible/hosts
+cat << 'EOF' | sudo tee /etc/ansible/hosts
+[linux]
+146.190.220.5 ansible_user=ansible
+
+[win]
+192.168.229.1 ansible_user=ansible ansible_password=password123* ansible_connection=winrm ansible_winrm_transport=basic ansible_port=5985 ansible_winrm_server_cert_validation=ignore
+EOF
+
+# 6. Probar la conectividad mediante el módulo ping hacia ambos nodos
+sudo su - ansible -c "ansible linux -m ping"
+sudo su - ansible -c "ansible win -m win_ping"
+
+================================================================================
+PRÁCTICA 4: COMANDOS AD-HOC
+================================================================================
+CONFIGURACIÓN Y PRUEBAS EN EL SERVIDOR CONTROLADOR (RHEL)
+================================================================================
+COMANDOS EJECUTADOS:
+
+1. Preparar archivo de prueba en el Escritorio de Windows (Ejecutado en Windows PowerShell):
+New-Item -Path "C:\Users\ansible\Desktop\prueba.txt" -ItemType File -Value "Archivo de prueba para Ansible Ad-Hoc" -Force
+
+2. Utilizando el módulo win_copy utilizar un comando ad-hoc que copie un archivo txt ubicado en el escritorio de la máquina ansible2 a la carpeta de documentos
+sudo su - ansible -c "ansible win -m win_copy -a 'src=C:/Users/ansible/Desktop/prueba.txt dest=C:/Users/ansible/Documents/prueba.txt remote_src=yes'"
+
+3. Utilizando el módulo reboot utilizar un comando ad-hoc que reinicie la VM ansible1
+sudo su - ansible -c "ansible linux -b -m reboot"
+
+================================================================================
+PRÁCTICA 5: PLAYBOOKS
+================================================================================
+CONFIGURACIÓN EN EL SERVIDOR CONTROLADOR (RHEL)
+================================================================================
+COMANDOS EJECUTADOS:
+
+1. Crear un playbook para instalar la aplicación notepad++ en la máquina ansible2 (Windows)
+cat << 'EOF' | sudo tee /etc/ansible/install_notepad.yml
+---
+- name: Instalar Notepad++ en Windows
+  hosts: win
+  tasks:
+    - name: Descargar e instalar Notepad++ mediante Chocolatey
+      chocolatey.chocolatey.win_chocolatey:
+        name: notepadplusplus
+        state: present
+EOF
+
+sudo su - ansible -c "ansible-playbook /etc/ansible/install_notepad.yml"
+
+2. Crear un playbook en la máquina ansible1 (linux) para que instale NGINX e inicie el servicio
+cat << 'EOF' | sudo tee /etc/ansible/install_nginx.yml
+---
+- name: Instalar y configurar NGINX en Linux
+  hosts: linux
+  become: yes
+  tasks:
+    - name: Actualizar repositorios e instalar NGINX
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+        update_cache: yes
+
+    - name: Iniciar y habilitar el servicio NGINX
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: yes
+EOF
+
+sudo su - ansible -c "ansible-playbook /etc/ansible/install_nginx.yml"
+
+3. Verificación de la respuesta del servicio NGINX desde RHEL
+curl http://146.190.220.5
