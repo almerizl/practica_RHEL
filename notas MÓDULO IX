@@ -1,0 +1,195 @@
+MÓDULO IX
+Requiere: VM server (Ansible Controller), VM cliente Linux en Digital Ocean (ansible1), VM Windows
+(ansible2).
+Práctica 1 — Instalación de Webmin
+Instalación desde cero en RHEL
+sudo dnf install -y wget perl perl-Net-SSLeay openssl perl-IO-Tty perl-Encode-Detect
+wget http://prdownloads.sourceforge.net/webadmin/webmin-2.111-1.noarch.rpm
+sudo rpm -U webmin-2.111-1.noarch.rpm
+sudo firewall-cmd --permanent --add-port=10000/tcp
+sudo firewall-cmd --reload
+sudo systemctl enable --now webmin
+Acceder desde el navegador: https://IP_DEL_SERVIDOR:10000 con el usuario root del sistema.
+Opciones de administración que se pueden ejecutar vía Webmin
+Categoría Qué se puede hacer
+Administración de
+usuarios
+System → Users and Groups: crear y eliminar cuentas de usuario, cambiar contraseñas,
+asignar grupos
+Gestión de servicios System → Bootup and Shutdown: iniciar, detener y reiniciar servicios (ej: sshd)
+Configuración de red Networking → Network Configuration: configurar IP estática en interfaces de red
+Administración de
+software
+System → Software Package Updates: actualizar, instalar y eliminar herramientas (RPM/
+dnf)
+Gestión de archivos Tools → File Manager: explorar, editar y eliminar archivos/directorios
+Monitorización del
+sistema
+System → System and Server Status / Status: supervisar CPU, memoria y
+almacenamiento
+Verificación:
+systemctl status webmin
+ss -tulnp | grep 10000
+Qué hacer si falla:
+No accede al panel → confirmar firewalld abierto en 10000/tcp y que el servicio esté activo.
+Error de dependencias al instalar el rpm → sudo dnf install -y webmin --nogpgcheck apuntando
+al mismo rpm, o resolver dependencias faltantes con sudo dnf install -y perl-Net-SSLeay .
+•
+•
+Página 35 de 43
+Práctica 2 — Terraform en Digital Ocean
+1. Instalar Terraform
+sudo dnf install -y dnf-plugins-core
+sudo dnf config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo
+sudo dnf install -y terraform
+terraform -version
+2. Crear el archivo de configuración
+mkdir ~/terraform-do && cd ~/terraform-do
+nano main.tf
+terraform {
+required_providers {
+digitalocean = {
+source = "digitalocean/digitalocean"
+version = "~> 2.0"
+}
+}
+}
+variable "do_token" {}
+provider "digitalocean" {
+token = var.do_token
+}
+resource "digitalocean_droplet" "os3vm" {
+image = "ubuntu-22-04-x64"
+name = "OS3vm"
+region = "nyc1"
+size = "s-1vcpu-1gb"
+ssh_keys = [digitalocean_ssh_key.llave.fingerprint]
+}
+resource "digitalocean_ssh_key" "llave" {
+name = "llave-ansible-server"
+public_key = file("~/.ssh/id_rsa.pub")
+}
+3. Desplegar
+terraform init
+terraform plan -var="do_token=TU_TOKEN_DE_DIGITALOCEAN"
+terraform apply -var="do_token=TU_TOKEN_DE_DIGITALOCEAN" -auto-approve
+4. Validar el despliegue
+terraform show
+ssh root@$(terraform output -raw ip_address 2>/dev/null || echo "IP_MOSTRADA_EN_APPLY")
+También validar desde el portal web de Digital Ocean → Droplets → confirmar que OS3vm aparece con
+imagen Ubuntu 22.04, región NYC1 y tamaño s-1vcpu-1gb.
+Página 36 de 43
+Verificación:
+terraform state list
+doctl compute droplet list # si doctl está instalado y autenticado
+Qué hacer si falla:
+Error: Unauthorized → el token de DigitalOcean es inválido o expiró; generar uno nuevo en el
+panel de DO (API → Generate New Token, con permisos de escritura).
+La llave SSH no existe en la ruta indicada → generar antes:
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa
+terraform: command not found → confirmar que el repo de HashiCorp se agregó correctamente y
+reintentar sudo dnf install -y terraform .
+•
+•
+•
+Página 37 de 43
+Práctica 3 — Instalación de Ansible
+1. Instalar Ansible en el controller
+sudo dnf install -y epel-release
+sudo dnf install -y ansible
+ansible --version
+2. Preparar los clientes (linux y windows) para ser gestionados
+# En ansible1 (Linux - Digital Ocean)
+sudo useradd -m -s /bin/bash ansible
+sudo passwd ansible
+sudo usermod -aG wheel ansible
+echo "ansible ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/ansible
+# En el controller, generar y copiar llave SSH sin passphrase para el usuario ansible
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+ssh-copy-id ansible@IP_ANSIBLE1
+# En ansible2 (Windows) - habilitar WinRM (ejecutar en PowerShell como Administrador)
+# Descargar y ejecutar el script oficial de configuración WinRM para Ansible:
+# https://github.com/ansible/ansible-documentation/blob/devel/docs/docsite/rst/
+ConfigureRemotingForAnsible.ps1
+Set-ExecutionPolicy Unrestricted -Force
+.\ConfigureRemotingForAnsible.ps1 -CertValidityDays 3650
+# En el controller, instalar dependencias para gestionar Windows
+sudo dnf install -y python3-pip
+pip3 install pywinrm --break-system-packages
+3. Crear inventario de Ansible
+Ruta: /etc/ansible/hosts
+sudo mkdir -p /etc/ansible
+sudo nano /etc/ansible/hosts
+[linux]
+ansible1 ansible_host=IP_ANSIBLE1 ansible_user=ansible
+[win]
+ansible2 ansible_host=IP_ANSIBLE2 ansible_connection=winrm ansible_user=Administrador
+ansible_password='ContraseñaWin' ansible_winrm_transport=basic
+ansible_winrm_server_cert_validation=ignore ansible_port=5986
+4. Probar conexión con el módulo ping
+ansible linux -m ping
+ansible win -m win_ping
+Verificación:
+ansible-inventory --list
+ansible all -m ping
+Página 38 de 43
+Qué hacer si falla:
+UNREACHABLE en Linux → probar SSH manual ( ssh ansible@IP ) primero; confirmar que la llave se
+copió sin passphrase.
+UNREACHABLE en Windows → confirmar WinRM escuchando: en el cliente Windows,
+winrm enumerate winrm/config/listener ; revisar firewall de Windows permitiendo el puerto 5986.
+Error de módulo pywinrm faltante → pip3 install pywinrm --break-system-packages en el
+controller.
+Práctica 4 — Comandos Ad-Hoc
+1. Copiar archivo con win_copy (Escritorio → Documentos, en ansible2)
+ansible win -m win_copy -a "src=/home/ansible/archivo.txt dest='C:
+\Users\Administrador\Documents\archivo.txt'"
+2. Reiniciar ansible1 con el módulo reboot
+ansible ansible1 -m reboot -b
+Qué hacer si falla:
+win_copy falla con ruta no encontrada → confirmar que el archivo origen existe en el controller y
+usar comillas para rutas de Windows con espacios.
+reboot requiere privilegios → agregar -b (become) para escalar con sudo.
+•
+•
+•
+•
+•
+Página 39 de 43
+Práctica 5 — Playbooks
+1. Playbook: instalar Notepad++ en ansible2 (Windows)
+nano notepadpp.yml
+---
+- name: Instalar Notepad++
+hosts: win
+tasks:
+- name: Instalar Notepad++ con Chocolatey
+win_chocolatey:
+name: notepadplusplus
+state: present
+ansible-playbook notepadpp.yml
+2. Playbook: instalar y arrancar NGINX en ansible1 (Linux)
+nano nginx.yml
+---
+- name: Instalar NGINX
+hosts: linux
+become: yes
+tasks:
+- name: Instalar nginx
+dnf:
+name: nginx
+state: present
+- name: Iniciar y habilitar nginx
+service:
+name: nginx
+state: started
+enabled: yes
+ansible-playbook nginx.yml
+Verificación:
+ansible win -m win_shell -a "Get-Package notepadplusplus"
+ansible linux -m shell -a "systemctl status nginx" -b
+Qué hacer si falla:
+win_chocolatey: module not found → Chocolatey debe estar instalado en el cliente Windows
+primero, o usar win_chocolatey con la tarea previa de instalación de Chocolatey.
+nginx falla al iniciar por puerto 80 ocupado por Apache → detener httpd primero:
+ansible linux -m service -a "name=httpd state=stopped" -b
