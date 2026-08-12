@@ -206,3 +206,259 @@ sudo su - ansible -c "ansible-playbook /etc/ansible/install_nginx.yml"
 
 3. Verificación de la respuesta del servicio NGINX desde RHEL
 curl http://146.190.220.5
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ================================================================================
+GUÍA COMPLETA Y BITÁCORA DE LABORATORIO - MÓDULO IX (RHEL 9/10)
+Cris Almeris Zanellato Lorenzo | Matrícula: 2025-2285 | Docente: Adrián Alcántara
+
+---
+
+## PRÁCTICA 1: INSTALACIÓN Y CONFIGURACIÓN DE WEBMIN
+
+1. AGREGAR REPOSICIONARIO E INSTALAR WEBMIN:
+cat << 'EOF' > /etc/yum.repos.d/webmin.repo
+[Webmin]
+name=Webmin Distribution Neutral
+baseurl=[https://download.webmin.com/download/yum](https://download.webmin.com/download/yum)
+enabled=1
+gpgcheck=1
+gpgkey=[https://download.webmin.com/jcameron-key.asc](https://download.webmin.com/jcameron-key.asc)
+EOF
+dnf install -y webmin
+systemctl enable --now webmin
+2. APERTURA DE PUERTOS EN FIREWALL:
+firewall-cmd --add-port=10000/tcp --permanent
+firewall-cmd --reload
+3. VERIFICACIÓN Y ACCESO VÍA WEB:
+* Abrir navegador e ir a: `https://<IP_RHEL>:10000`
+* Autenticarse con credenciales de `root`.
+* Modulos clave: Usuarios, Servicios (SSHD/Firewall), Red, DNF/RPM y Monitorización de CPU/RAM.
+
+
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 1:
+* Error al descargar/validar llave GPG: Desactiva temporalmente el check modificando `gpgcheck=0` en `/etc/yum.repos.d/webmin.repo`.
+* No abre la página en puerto 10000: Verifica que el servicio esté corriendo con `systemctl status webmin` y confirma que la URL use **HTTPS** (`https://...`).
+
+
+
+---
+
+## PRÁCTICA 2: INFRAESTRUCTURA COMO CÓDIGO (TERRAFORM + DIGITALOCEAN)
+
+1. INSTALACIÓN DE TERRAFORM Y LLAVES SSH:
+dnf install -y yum-utils
+yum-config-manager --add-repo [https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo](https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo)
+dnf install -y terraform
+mkdir -p /home/terraform_do && cd /home/terraform_do
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+2. CREACIÓN Y DESPLIEGUE DEL ARCHIVO `main.tf`:
+cat << 'EOF' > main.tf
+terraform {
+required_providers {
+digitalocean = {
+source  = "digitalocean/digitalocean"
+version = "~> 2.0"
+}
+}
+}
+provider "digitalocean" {
+token = var.do_token
+}
+variable "do_token" {}
+resource "digitalocean_ssh_key" "default" {
+name       = "ansible-controller-key"
+public_key = file("~/.ssh/id_rsa.pub")
+}
+resource "digitalocean_droplet" "OS3vm" {
+image    = "ubuntu-22-04-x64"
+name     = "OS3vm"
+region   = "nyc1"
+size     = "s-1vcpu-1gb"
+ssh_keys = [digitalocean_ssh_key.default.fingerprint]
+}
+output "ip_address" {
+value = digitalocean_droplet.OS3vm.ipv4_address
+}
+EOF
+3. EJECUCIÓN Y CONEXIÓN:
+terraform init
+terraform apply -var="do_token=TU_DIGITALOCEAN_API_TOKEN" -auto-approve
+# Conectar a la IP pública obtenida en el output de Terraform:
+
+
+ssh root@146.190.220.5
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 2:
+* Error `401 Unauthorized` en `terraform apply`: El token API de DigitalOcean es inválido o no tiene permisos de lectura/escritura (Read/Write). Revisa la variable `-var="do_token=..."`.
+* Error `file("~/.ssh/id_rsa.pub") no found`: No has generado las llaves SSH en la carpeta de root. Ejecuta `ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""` primero.
+
+
+
+---
+
+## PRÁCTICA 3: INSTALACIÓN DE ANSIBLE Y CONFIGURACIÓN DE INVENTARIO
+
+1. INSTALACIÓN Y CREACIÓN DE USUARIO 'ANSIBLE':
+dnf install -y epel-release
+dnf install -y ansible
+pip3 install pywinrm
+useradd -m ansible
+echo "ansible ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/ansible
+su - ansible -c "ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ''"
+2. APROVISIONAMIENTO EN CLIENTE LINUX (DROPLET DIGITALOCEAN):
+cat /home/ansible/.ssh/id_rsa.pub | ssh root@146.190.220.5 "useradd -m ansible 2>/dev/null; echo 'ansible ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/ansible; mkdir -p /home/ansible/.ssh && cat >> /home/ansible/.ssh/authorized_keys && chown -R ansible:ansible /home/ansible/.ssh && chmod 700 /home/ansible/.ssh && chmod 600 /home/ansible/.ssh/authorized_keys"
+3. CONFIGURACIÓN EN CLIENTE WINDOWS (POWERSHELL ADMINISTRADOR):
+# Enable-PSRemoting -Force
+
+
+# Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value true
+
+
+# Set-Item WSMan:\localhost\Service\Auth\Basic -Value true
+
+
+# New-NetFirewallRule -Name "WinRM-HTTP" -DisplayName "WinRM HTTP" -Protocol TCP -LocalPort 5985 -Action Allow
+
+
+# net user ansible password123* /add
+
+
+# net localgroup Administrators ansible /add
+
+
+4. CONFIGURACIÓN DEL INVENTARIO (`/etc/ansible/hosts`) Y COMPROBACIÓN:
+rm -rf /etc/ansible/hosts
+cat << 'EOF' > /etc/ansible/hosts
+[linux]
+146.190.220.5 ansible_user=ansible
+[win]
+192.168.229.1 ansible_user=ansible ansible_password=password123* ansible_connection=winrm ansible_winrm_transport=basic ansible_port=5985 ansible_winrm_server_cert_validation=ignore
+EOF
+# Validar conectividad:
+
+
+su - ansible -c "ansible linux -m ping"
+su - ansible -c "ansible win -m win_ping"
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 3:
+* Error `UNREACHABLE!` en `win_ping`: Ocurre porque falta la librería `pywinrm` (`pip3 install pywinrm`), la VM de Windows no tiene el puerto 5985 abierto, o no se permitieron unencrypted/basic auth en WSMan.
+* Error `Permission Denied (publickey)` en `ansible linux -m ping`: La llave pública no se copió bien a `/home/ansible/.ssh/authorized_keys` en el cliente o los permisos no son 600.
+
+
+
+---
+
+## PRÁCTICA 4: COMANDOS AD-HOC DE ANSIBLE
+
+1. REQUISITO PREVIO EN WINDOWS (CREAR ARCHIVO EN ESCRITORIO):
+# En Windows PowerShell:
+
+
+New-Item -Path "C:\Users\ansible\Desktop\prueba.txt" -ItemType File -Value "Archivo de prueba para Ansible Ad-Hoc" -Force
+2. COPIA DE ARCHIVO EN WINDOWS (MÓDULO `win_copy`):
+su - ansible -c "ansible win -m win_copy -a 'src=C:/Users/ansible/Desktop/prueba.txt dest=C:/Users/ansible/Documents/prueba.txt remote_src=yes'"
+3. REINICIO DE MÁQUINA LINUX (MÓDULO `reboot`):
+su - ansible -c "ansible linux -b -m reboot"
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 4:
+* Error de ruta en `win_copy`: Recuerda usar barras inclinadas `/` o escapar las barras dobles `C:\\Users\\...` en comandos de Windows con Ansible.
+* Error de escalación de privilegios en reboot: Si falta `-b` (`--become`), la máquina Linux rechazará el comando de reinicio por falta de permisos root.
+
+
+
+---
+
+## PRÁCTICA 5: PLAYBOOKS DE ANSIBLE
+
+1. ## PLAYBOOK PARA INSTALAR NOTEPAD++ EN WINDOWS (`/etc/ansible/install_notepad.yml`):
+cat << 'EOF' > /etc/ansible/install_notepad.yml
+
+
+* name: Instalar Notepad++ en Windows
+hosts: win
+tasks:
+* name: Descargar e instalar Notepad++ mediante Chocolatey
+chocolatey.chocolatey.win_chocolatey:
+name: notepadplusplus
+state: present
+EOF
+
+
+
+
+su - ansible -c "ansible-playbook /etc/ansible/install_notepad.yml"
+2. ## PLAYBOOK PARA INSTALAR Y HABILITAR NGINX EN LINUX (`/etc/ansible/install_nginx.yml`):
+cat << 'EOF' > /etc/ansible/install_nginx.yml
+
+
+* name: Instalar y configurar NGINX en Linux
+hosts: linux
+become: yes
+tasks:
+* name: Actualizar repositorios e instalar NGINX
+ansible.builtin.apt:
+name: nginx
+state: present
+update_cache: yes
+* name: Iniciar y habilitar el servicio NGINX
+ansible.builtin.service:
+name: nginx
+state: started
+enabled: yes
+EOF
+
+
+
+
+su - ansible -c "ansible-playbook /etc/ansible/install_nginx.yml"
+3. VERIFICACIÓN DE RESPUESTA WEB DE NGINX:
+curl [http://146.190.220.5](http://146.190.220.5)
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 5:
+* Error `chocolatey.chocolatey.win_chocolatey module not found`: Instala la colección de Windows ejecutando: `su - ansible -c "ansible-galaxy collection install chocolatey.chocolatey"`.
+* Error `YAML syntax error`: Los archivos `.yml` no aceptan la tecla TAB. Revisa las sangrías y asegúrate de usar únicamente espacios en blanco.
+
+
+
+---
+
+## LIMPIEZA DE MÁQUINA (SI SE REQUIERE ENTREGAR LIMPIA / DE FÁBRICA)
+
+# cd /home/terraform_do 2>/dev/null && terraform destroy -var="do_token=TU_DIGITALOCEAN_API_TOKEN" -auto-approve
+systemctl stop webmin
+history -c && history -w
+clear
+
+
+
+
+
+
+
+
+
+
+
+
+
+
