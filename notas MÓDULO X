@@ -1,0 +1,76 @@
+MÓDULO X
+Práctica 1 — Instalación de Issabel PBX
+Página 41 de 43
+1. Crear la VM en Digital Ocean con Rocky Linux 8
+Digital Ocean → Create → Droplets → Imagen: Rocky Linux 8 → plan básico (mínimo 2 GB RAM
+recomendado) → agregar la llave SSH → Create Droplet.
+2. Ingresar vía SSH, actualizar e instalar wget
+ssh root@IP_DEL_DROPLET
+yum update -y
+yum install wget -y
+3. Descargar y ejecutar el script Netinstall de Issabel
+wget http://repo.issabel.org/issabel5-netinstall.sh
+chmod +x issabel5-netinstall.sh
+./issabel5-netinstall.sh
+4. Proceso de instalación interactivo
+Elegir versión de Asterisk: 16 o 18
+Definir contraseña de MariaDB
+Definir usuario y contraseña del portal web (issabeladmin)
+Al finalizar, volver a entrar por SSH y desactivar fail2ban para evitar baneos de IP durante las pruebas:
+ssh root@IP_DEL_DROPLET
+sudo systemctl stop fail2ban
+sudo systemctl disable fail2ban
+5. Acceder al panel web
+Desde el navegador del host: https://IP_DEL_DROPLET → ingresar con las credenciales del portal definidas
+en la instalación.
+6. Crear las 2 extensiones SIP
+PBX → PBX Configuration → Extensions → Add Extension → Generic SIP Device
+Campo Extensión 2221 (estudiante) Extensión 2220 (profesor)
+User Extension 2221 2220
+Display Name Estudiante Profesor
+Secret Teletubies123$ Teletubies123$
+Guardar cada extensión con Submit y luego aplicar los cambios con el botón naranja Apply Config en la
+parte superior.
+7. Configurar softphone móvil (Zoiper / MicroSIP)
+Instalar Zoiper o MicroSIP desde App Store / Play Store. Configurar cuenta SIP:
+Usuario/Extensión: 2221
+Contraseña: Teletubies123$
+Dominio/Host: IP_DEL_DROPLET
+Puerto: 5060 (UDP)
+•
+•
+•
+•
+•
+•
+•
+Página 42 de 43
+Verificación:
+# En el servidor
+asterisk -rvvv
+# Dentro de la consola de Asterisk:
+sip show peers
+pjsip show endpoints
+# Confirmar que el softphone registra correctamente (debe verse "OK" / "Registered")
+Qué hacer si falla:
+El softphone no registra → revisar el firewall del droplet (puertos 5060/UDP para SIP y rango RTP
+10000-20000/UDP):
+sudo firewall-cmd --permanent --add-port=5060/udp
+sudo firewall-cmd --permanent --add-port=10000-20000/udp
+sudo firewall-cmd --reload
+No carga el panel web → confirmar que el servicio Apache/httpd de Issabel esté activo: systemctl
+status httpd
+Se generan baneos de IP durante pruebas → confirmar que fail2ban quedó detenido y
+deshabilitado.
+No hay audio en la llamada (solo timbra) → problema típico de NAT/RTP; en Digital Ocean revisar
+configuración de NAT en PBX → General Settings → Asterisk NAT Settings, poniendo la IP
+pública del droplet.
+Error en el script netinstall por falta de espacio/RAM → confirmar que el droplet tenga al menos 2
+GB de RAM antes de reintentar.
+Datos de entrega para la práctica
+Dato Valor
+IP de la PBX IP pública del droplet en Digital Ocean
+Usuario portal usuario definido en instalación (no dejar el de por defecto)
+Contraseña portal contraseña definida en instalación (no dejar la de por defecto)
+Extensión estudiante 2221
+Extensión profesor 2220 — Secret: Teletubies123$
