@@ -1,0 +1,116 @@
+MÓDULO III
+Práctica 1 — GRUB: tiempo de espera y recuperación de root
+1. Configurar el timeout del menú GRUB a 20 segundos
+sudo nano /etc/default/grub
+Buscar y modificar la línea (sin usar '#' en la línea que se modifica):
+GRUB_TIMEOUT=20
+# Regenerar el archivo de configuración de grub
+sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+# En sistemas UEFI:
+sudo grub2-mkconfig -o /boot/efi/EFI/redhat/grub.cfg
+2. Recuperar contraseña de root olvidada
+Reiniciar la VM. En el menú de GRUB presionar e sobre la entrada del kernel.
+Buscar la línea que empieza con linux (o linux16 ) e ir al final de esa línea.
+Agregar al final: rd.break
+Presionar Ctrl+X para arrancar en modo emergencia.
+# Ya en el shell de emergencia:
+mount -o remount,rw /sysroot
+chroot /sysroot
+passwd root
+# escribir la nueva contraseña dos veces
+# Restaurar contexto SELinux para evitar bloqueo en próximo arranque
+touch /.autorelabel
+exit
+exit
+# El sistema reiniciará y relabeleará SELinux automáticamente
+Verificación:
+cat /etc/default/grub | grep TIMEOUT
+# Tras reiniciar y loguear con la nueva contraseña de root:
+whoami
+Qué hacer si falla:
+El cambio de timeout no se refleja → confirmar que se ejecutó grub2-mkconfig apuntando al
+archivo correcto (BIOS vs UEFI, verificar con ls /sys/firmware/efi si existe UEFI).
+Tras rd.break el sistema entra en modo solo lectura permanente → verificar que se ejecutó el
+mount -o remount,rw /sysroot antes del chroot.
+SELinux bloquea el login tras cambiar el password → confirmar que se creó /.autorelabel antes
+de reiniciar.
+1.
+2.
+3.
+4.
+•
+•
+•
+Página 11 de 43
+Práctica 2 — Scripts Bash
+1. Script de backup con TAR (fecha y hora en el nombre)
+nano ~/backup_home.sh
+#!/bin/bash
+FECHA=$(date +"%d-%m-%Y:%H:%M")
+tar -czvf /home/$(whoami)/backup_$(whoami)_$FECHA.tar.gz /home/$(whoami)
+chmod +x ~/backup_home.sh
+./backup_home.sh
+ls -l ~/*.tar.gz
+2. Script que copia el resultado de ifconfig al escritorio, preguntando el nombre
+nano ~/ifconfig_backup.sh
+#!/bin/bash
+read -p "¿Qué nombre desea ponerle al archivo? " NOMBRE
+ifconfig > /home/$(whoami)/Desktop/$NOMBRE.txt
+echo "Archivo creado en el escritorio como $NOMBRE.txt"
+chmod +x ~/ifconfig_backup.sh
+./ifconfig_backup.sh
+ls -l ~/Desktop/
+Qué hacer si falla:
+ifconfig: command not found → instalar net-tools: sudo dnf install -y net-tools
+Permission denied al ejecutar el script → confirmar chmod +x nombre.sh
+No existe carpeta Desktop → crearla: mkdir -p ~/Desktop
+•
+•
+•
+Página 12 de 43
+Práctica 3 — SSH sin contraseña (llaves)
+1. Modo Bridge y ping desde host Windows
+# En la VM server (Linux):
+nmcli connection modify enp0s3 ipv4.method manual ipv4.addresses 192.168.1.50/24 ipv4.gateway
+192.168.1.1
+nmcli connection up enp0s3
+# Desde CMD/PowerShell en Windows:
+ping 192.168.1.50
+2. Habilitar y probar SSH
+# En el servidor Linux
+sudo dnf install -y openssh-server
+sudo systemctl enable --now sshd
+sudo firewall-cmd --permanent --add-service=ssh
+sudo firewall-cmd --reload
+# Desde el host Windows (PowerShell/CMD/PuTTY)
+ssh usuario@192.168.1.50
+3. Generar par de llaves en el host Windows
+ssh-keygen -t rsa -b 4096
+# Cuando pregunte la ruta, presionar Enter para usar la ruta por defecto:
+# C:\Users\TuUsuario\.ssh\id_rsa
+# Cuando pida passphrase: dejar en blanco (Enter, Enter)
+4. Copiar la llave pública al servidor
+# Opción 1 (Linux/WSL/Git Bash en Windows)
+ssh-copy-id usuario@192.168.1.50
+# Opción 2 manual (funciona en cualquier caso)
+type C:\Users\TuUsuario\.ssh\id_rsa.pub | ssh usuario@192.168.1.50 "mkdir -p ~/.ssh && cat >>
+~/.ssh/authorized_keys"
+# En el servidor, asegurar permisos correctos
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys
+5. Probar conexión automática sin contraseña
+ssh usuario@192.168.1.50
+# Debe entrar directo sin pedir password
+Verificación:
+systemctl status sshd
+firewall-cmd --list-services
+ssh -v usuario@192.168.1.50 # modo verboso para confirmar auth por publickey
+Página 13 de 43
+Qué hacer si falla:
+Sigue pidiendo contraseña → revisar permisos: ~/.ssh debe ser 700 y ~/.ssh/authorized_keys
+debe ser 600; el home no debe tener permisos 777.
+Conexión rechazada → revisar firewall:
+sudo firewall-cmd --add-service=ssh --permanent && sudo firewall-cmd --reload
+SELinux bloquea auth por llave → sudo restorecon -R -v ~/.ssh
+No hay ping entre host y VM → confirmar que ambos estén en la misma subred y el adaptador esté
+en modo Bridge, no NAT.
