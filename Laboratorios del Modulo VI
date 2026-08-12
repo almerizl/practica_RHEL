@@ -134,3 +134,200 @@ COMANDOS EJECUTADOS:
 # Actualización obligatoria de clave administrativa y reinicio del servicio
    passwd root
    systemctl restart sshd
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ================================================================================
+GUÍA COMPLETA Y BITÁCORA DE LABORATORIO - MÓDULO VI (RHEL 9/10)
+Cris Almeris Zanellato Lorenzo | Matrícula: 2025-2285 | Docente: Adrián Alcántara
+
+---
+
+## PRÁCTICA 1: CIFRADO SIMÉTRICO DE DATOS (GPG2)
+
+1. COMANDOS DE CONFIGURACIÓN Y CIFRADO:
+dnf install gnupg2 -y
+mkdir -p ~/practica_cifrado && cd ~/practica_cifrado
+echo "esta es mi practica #1 de cifrado - cris almeris Zanellato lorenzo" > secreto.txt
+# Cifrar archivo (Asigna una clave/passphrase cuando la terminal lo pida):
+
+
+gpg2 -c secreto.txt
+2. VERIFICACIÓN Y DESCIFRADO:
+cat secreto.txt.gpg                           # Muestra contenido cifrado (ilegible)
+rm -f secreto.txt                            # Elimina el original plano para probar
+gpg2 -d secreto.txt.gpg > secreto.txt        # Descifra usando la clave asignada
+cat secreto.txt                              # Muestra la información recuperada
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 1:
+* Error `Inappropriate ioctl for device` al pedir clave en SSH: Agrega la variable de terminal exportando la TTY antes de cifrar: `export GPG_TTY=$(tty)`.
+* Error al instalar `gnupg2`: Confirma que la ISO está montada en `/mnt/disc` y el archivo `/etc/yum.repos.d/local.repo` activo.
+
+
+
+---
+
+## PRÁCTICA 2: SEGURIDAD PERIMETRAL Y CONTROL DE PUERTOS (IPTABLES Y FIREWALL-CMD)
+
+1. ASEGURAR SERVICIOS Y BLOQUEO CON IPTABLES:
+systemctl start sshd httpd vsftpd
+# A. Aplicar políticas DROP en IPTABLES para puertos 80, 21 y 22:
+
+
+iptables -A INPUT -p tcp --dport 80 -j DROP
+iptables -A INPUT -p tcp --dport 21 -j DROP
+iptables -A INPUT -p tcp --dport 22 -j DROP
+iptables -L -n -v                            # VERIFICACIÓN: Revisa reglas y contadores
+# B. Eliminar reglas de IPTABLES para restaurar flujo:
+
+
+iptables -D INPUT -p tcp --dport 80 -j DROP
+iptables -D INPUT -p tcp --dport 21 -j DROP
+iptables -D INPUT -p tcp --dport 22 -j DROP
+2. REGLAS ENRIQUECIDAS CON FIREWALL-CMD (RICH RULES):
+systemctl start firewalld
+# A. Inyectar Rich Rules para denegar acceso:
+
+
+firewall-cmd --permanent --add-rich-rule='rule family="ipv4" port port="80" protocol="tcp" reject'
+firewall-cmd --permanent --add-rich-rule='rule family="ipv4" port port="21" protocol="tcp" reject'
+firewall-cmd --permanent --add-rich-rule='rule family="ipv4" port port="22" protocol="tcp" reject'
+firewall-cmd --reload
+firewall-cmd --list-all                      # VERIFICACIÓN: Muestra las Rich Rules activas
+# B. Remover Rich Rules para limpiar la configuración:
+
+
+firewall-cmd --permanent --remove-rich-rule='rule family="ipv4" port port="80" protocol="tcp" reject'
+firewall-cmd --permanent --remove-rich-rule='rule family="ipv4" port port="21" protocol="tcp" reject'
+firewall-cmd --permanent --remove-rich-rule='rule family="ipv4" port port="22" protocol="tcp" reject'
+firewall-cmd --reload
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 2:
+* Error `Unit vsftpd.service not found`: El servidor FTP no está instalado. Ejecuta `dnf install -y vsftpd` con la ISO montada.
+* Conflicto entre `iptables` y `firewalld`: Si usas `iptables` directo mientras `firewalld` está activo, las reglas pueden sobreescribirse. Detén `firewalld` para probar `iptables` puras (`systemctl stop firewalld`).
+
+
+
+---
+
+## PRÁCTICA 3: ESTRUCTURA DE FIRMAS Y ANÁLISIS DE TRÁFICO (TCPDUMP)
+
+1. ESTRUCTURA BASE DE FIRMAS SNORT:
+mkdir -p ~/practica_snort && cd ~/practica_snort
+cat << 'EOF' > snort.rules
+alert icmp any any -> any any (sid:1;)
+alert tcp any any -> any 21 (sid:2;)
+alert tcp any any -> any 22 (sid:3;)
+alert tcp any any -> any 80 (sid:4;)
+EOF
+cat snort.rules
+2. AUDITORÍA Y MONITOREO DE RED EN TIEMPO REAL:
+systemctl stop firewalld                     # Detiene firewall para captura limpia
+# Ejecutar escuchas por separado según la prueba (Usar interfaz ens160):
+
+
+tcpdump -i ens160 icmp                       # Tráfico Ping
+tcpdump -i ens160 port 21                    # Tráfico FTP
+tcpdump -i ens160 port 22                    # Tráfico SSH
+tcpdump -i ens160 port 80                    # Tráfico HTTP
+3. VERIFICACIÓN DESDE OTRA MÁQUINA / HOST:
+ping 192.168.124.132                         # Genera tráfico ICMP
+curl 192.168.124.132:21                      # Genera tráfico TCP 21
+curl 192.168.124.132:22                      # Genera tráfico TCP 22
+curl [http://192.168.124.132](http://192.168.124.132)                  # Genera tráfico TCP 80
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 3:
+* Error `tcpdump: ens160: No such device exists`: Tu interfaz de red se llama diferente. Ejecuta `ip addr` para ver el nombre real (ej. `eth0` o `ens33`) y cámbialo en el comando `tcpdump -i <interfaz>`.
+* `tcpdump` no captura paquetes: Confirma que la interfaz de VMware esté en Bridge/NAT compartiendo segmento con la IP desde la que envías el tráfico.
+
+
+
+---
+
+## PRÁCTICA 4: AUTENTICACIÓN MULTIFACTOR (2FA) PARA SSH CON PAM
+
+1. INSTALACIÓN DE DEPENDENCIAS Y SEMILLA TOTP:
+# Restauración de repositorios si estaban en respaldo e instalación:
+
+
+mv /etc/yum.repos.d/backup_repos/* /etc/yum.repos.d/ 2>/dev/null || mv ~/backup_repos/* /etc/yum.repos.d/ 2>/dev/null
+dnf clean all
+dnf install google-authenticator -y
+# Asistente interactivo (Escribir 'y' a las preguntas y guardar los códigos de emergencia):
+
+
+google-authenticator
+2. CONFIGURACIÓN PAM Y ENDURECIMIENTO DE SSHD:
+# Inyectar módulo PAM en la pila de SSHD:
+
+
+echo "auth required pam_google_authenticator.so" >> /etc/pam.d/sshd
+# Modificar políticas de autenticación en sshd_config:
+
+
+sed -i 's/KbdInteractiveAuthentication no/KbdInteractiveAuthentication yes/g' /etc/ssh/sshd_config
+sed -i 's/PermitRootLogin no/PermitRootLogin yes/g' /etc/ssh/sshd_config
+sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/g' /etc/ssh/sshd_config
+passwd root                                  # Actualizar clave de root
+systemctl restart sshd
+3. PRUEBA Y ACCESO:
+# Al intentar ingresar por SSH, la terminal pedirá:
+
+
+# 1. Verification code: (El código de 6 dígitos generado por la App Google Authenticator)
+
+
+# 2. Password: (La contraseña del usuario de RHEL)
+
+
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 4:
+* Te quedas bloqueado fuera del servidor por SSH: Abre la consola directa de la VM en VMware, entra como root y comenta la línea en `/etc/pam.d/sshd` poniendo un `#` al inicio (`#auth required pam_google_authenticator.so`) y reinicia el servicio con `systemctl restart sshd`.
+* Código de verificación rechazado constantemente: Revisa que la hora del servidor RHEL esté sincronizada (`date`). TOTP depende estrictamente del tiempo.
+* No instala `google-authenticator`: Requiere los repositorios EPEL habilitados. Ejecuta `dnf install epel-release -y` antes de instalar el paquete.
+
+
+
+---
+
+## LIMPIEZA DE MÁQUINA (SI SE REQUIERE ENTREGAR LIMPIA / DE FÁBRICA)
+
+# Restaurar /etc/pam.d/sshd eliminando la regla de google-authenticator:
+
+# sed -i '/pam_google_authenticator.so/d' /etc/pam.d/sshd
+systemctl restart sshd
+rm -rf ~/practica_cifrado ~/practica_snort ~/.google_authenticator 2>/dev/null
+history -c && history -w
+clear
