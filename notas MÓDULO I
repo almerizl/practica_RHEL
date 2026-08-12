@@ -1,0 +1,147 @@
+MÓDULO I
+Práctica 1 — Instalación del Sistema Operativo RHEL
+Paso a paso desde VM nueva (de fábrica)
+1. Verificar requisitos mínimos oficiales de RHEL: 2 GB RAM (recomendado 4 GB+), 2 vCPU, 20 GB de disco
+mínimo (recomendado 40+ GB).
+2. Crear la VM en el hipervisor (VirtualBox/VMware):
+Tipo: Red Hat Enterprise Linux (64-bit)
+RAM: 2048–4096 MB
+Disco: 20–40 GB, tipo dinámico (VDI/VMDK), controlador SATA
+Montar el archivo ISO de RHEL en la unidad óptica virtual
+3. Configurar la tarjeta de red en modo Bridge (Adaptador puente) antes de encender la VM:
+Configuración → Red → Adaptador 1 → Habilitar → Conectado a: Adaptador Puente → seleccionar la interfaz
+física de tu host.
+4. Encender la VM y arrancar desde la ISO. En el menú de GRUB de instalación elegir Install Red Hat
+Enterprise Linux .
+5. En Installation Summary configurar:
+Software Selection: Server with GUI (o Minimal Install si se pide algo ligero)
+Installation Destination: seleccionar el disco → Automatic partitioning (o manual con /, /boot, swap)
+Network & Host Name: activar la interfaz (ON), poner hostname, ej: server1.local
+Root Password: definir contraseña de root
+User Creation: crear usuario administrador (opcional, marcar "Make this user administrator")
+6. Clic en Begin Installation, esperar, luego Reboot. Al reiniciar aceptar la licencia (License Information) y
+completar el setup inicial.
+Verificación:
+cat /etc/redhat-release
+hostnamectl
+ip a
+Qué hacer si falla:
+No detecta el disco → revisar que el controlador de disco en el hipervisor sea SATA (no NVMe/SCSI
+sin driver).
+No arranca la ISO → verificar que la unidad óptica virtual tenga la ISO montada y el orden de
+arranque incluya el CD/DVD.
+Sin red tras instalar → ver Práctica 2 de este módulo.
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+Página 2 de 43
+Práctica 2 — Configuración de parámetros de red
+Página 3 de 43
+Todas las formas de configurar red en RHEL
+A) Con nmtui (interfaz de texto, la más rápida en examen)
+sudo nmtui
+Edit a connection → seleccionar la interfaz (ej: enp0s3) → Edit → IPv4 CONFIGURATION:
+Para estático: cambiar a Manual → Show → Addresses: 192.168.1.50/24 → Gateway: 192.168.1.1 →
+DNS servers: 8.8.8.8 , 8.8.4.4
+Para DHCP: dejar/cambiar a Automatic
+OK → Back → Activate a connection → Deactivate y luego Activate de nuevo (o reiniciar NetworkManager).
+B) Con nmcli (línea de comandos)
+# Ver conexiones e interfaces
+nmcli connection show
+nmcli device status
+# Configurar IP ESTÁTICA
+sudo nmcli connection modify enp0s3 ipv4.addresses 192.168.1.50/24
+sudo nmcli connection modify enp0s3 ipv4.gateway 192.168.1.1
+sudo nmcli connection modify enp0s3 ipv4.dns "8.8.8.8 8.8.4.4"
+sudo nmcli connection modify enp0s3 ipv4.method manual
+sudo nmcli connection up enp0s3
+# Configurar DHCP
+sudo nmcli connection modify enp0s3 ipv4.method auto
+sudo nmcli connection up enp0s3
+C) Editando el archivo de configuración directamente (NetworkManager keyfile)
+Ruta: /etc/NetworkManager/system-connections/enp0s3.nmconnection
+sudo nano /etc/NetworkManager/system-connections/enp0s3.nmconnection
+[connection]
+id=enp0s3
+type=ethernet
+interface-name=enp0s3
+[ipv4]
+method=manual
+address1=192.168.1.50/24,192.168.1.1
+dns=8.8.8.8;8.8.4.4;
+[ipv6]
+method=auto
+sudo chmod 600 /etc/NetworkManager/system-connections/enp0s3.nmconnection
+sudo nmcli connection reload
+sudo nmcli connection up enp0s3
+•
+•
+Página 4 de 43
+D) Con nmcli en un solo comando (crear conexión nueva)
+sudo nmcli con add type ethernet con-name estatica ifname enp0s3 \
+ipv4.addresses 192.168.1.50/24 ipv4.gateway 192.168.1.1 \
+ipv4.dns "8.8.8.8 8.8.4.4" ipv4.method manual
+sudo nmcli con up estatica
+E) DNS por separado (si ya tienes IP y solo falta DNS)
+sudo nmcli connection modify enp0s3 ipv4.dns "8.8.8.8 8.8.4.4"
+sudo nmcli connection modify enp0s3 ipv4.ignore-auto-dns yes
+sudo nmcli connection up enp0s3
+# Verificar
+cat /etc/resolv.conf
+Verificación:
+ip a
+ip route
+nmcli device show enp0s3 | grep IP4
+cat /etc/resolv.conf
+ping -c 3 8.8.8.8
+Qué hacer si falla:
+Interfaz no aparece con nmcli → nmcli device status revisar si está en estado "unmanaged";
+editar /etc/NetworkManager/NetworkManager.conf y quitar managed=false .
+Cambios no aplican → sudo systemctl restart NetworkManager
+resolv.conf no refleja el DNS → confirmar que no exista un /etc/resolv.conf estático conflictivo;
+NetworkManager lo regenera automáticamente.
+•
+•
+•
+Página 5 de 43
+Práctica 3 — Gestión de Usuarios y Grupos
+1) Crear usuario y agregarlo al grupo wheel (sudo)
+sudo useradd -m -c "Nombre Apellido" nombreusuario
+sudo passwd nombreusuario
+sudo usermod -aG wheel nombreusuario
+# Verificar
+groups nombreusuario
+id nombreusuario
+2) Crear grupo "guest", crear usuario y agregarlo al grupo
+sudo groupadd guest
+sudo useradd -m -G guest usuarioguest
+sudo passwd usuarioguest
+# Verificar
+getent group guest
+id usuarioguest
+3) Eliminar el usuario y el grupo creados
+# Eliminar usuario junto a su home y su mail spool
+sudo userdel -r usuarioguest
+# Eliminar el grupo
+sudo groupdel guest
+Verificación:
+getent passwd nombreusuario
+getent group wheel | grep nombreusuario
+id usuarioguest 2>&1 # debe decir "no such user" tras el userdel
+getent group guest # no debe devolver nada tras el groupdel
+Qué hacer si falla:
+userdel: user is currently used by process → cerrar sesión de ese usuario o matar procesos:
+sudo pkill -u usuarioguest y reintentar.
+groupdel falla porque es el grupo primario de otro usuario → cambiar el grupo primario de ese
+usuario con usermod -g otrogrupo usuario antes de borrar.
+El usuario nuevo no tiene permisos sudo → confirmar que /etc/sudoers tenga la línea %wheel
+ALL=(ALL) ALL sin comentar (visudo).
