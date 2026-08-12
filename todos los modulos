@@ -1,0 +1,845 @@
+# CENTRO DE OPERACIONES — REFERENCIA AMPLIADA SO3
+Estudiante: Cris Almeris Zanellato Lorenzo | Matrícula: 2025-2285
+
+comandos directos, sin relleno. Copia por bloques a tus .txt.
+
+---
+
+## MÓDULO I — INSTALACIÓN Y CONFIGURACIÓN DE RED (RHEL 9)
+
+### Instalación
+- Requisitos: 64 bits, 1.5GB RAM/núcleo, 10GB disco mínimo.
+- VM típica: 2 vCPU, 4GB RAM, 20GB disco, red en modo Bridge.
+- Instalación: idioma/teclado/zona horaria → Software: Server with GUI → Particionado automático → cuenta root + usuario inicial.
+
+### Red — 3 formas (ens160 es la interfaz típica, verifica con `ip a`)
+
+**nmcli (rápido, recomendado en examen):**
+```bash
+# DHCP
+nmcli connection modify ens160 ipv4.method auto ipv4.addresses "" ipv4.gateway "" ipv4.dns ""
+nmcli connection up ens160
+
+# IP estática
+nmcli connection modify ens160 ipv4.method manual ipv4.addresses 192.168.1.150/24 ipv4.gateway 192.168.1.1 ipv4.dns "8.8.8.8 8.8.4.4"
+nmcli connection up ens160
+
+# Ver conexiones y estado de dispositivos
+nmcli connection show
+nmcli device status
+nmcli connection show ens160   # detalle completo de la conexión
+```
+
+**nmtui:**
+```bash
+nmtui
+# Edit a connection -> ens160 -> IPv4 Manual -> Address/Gateway/DNS -> OK -> Back -> Activate a connection
+```
+
+**Keyfile directo:**
+```bash
+sudo nano /etc/NetworkManager/system-connections/ens160.nmconnection
+# [ipv4]
+# method=manual
+# address1=192.168.1.150/24,192.168.1.1
+# dns=8.8.8.8;8.8.4.4;
+sudo chmod 600 /etc/NetworkManager/system-connections/ens160.nmconnection   # IMPORTANTE: si el archivo no tiene permisos 600, NetworkManager lo ignora
+sudo nmcli connection reload
+nmcli connection up ens160
+```
+
+### Verificación
+```bash
+ip addr show ens160
+ip route show
+cat /etc/resolv.conf
+nmcli connection show ens160 | grep ipv4
+ping -c 3 8.8.8.8          # conectividad
+ping -c 3 google.com        # resolución DNS
+hostnamectl                 # ver hostname actual
+nmcli general hostname      # alternativa
+```
+
+### Cambiar hostname (por si lo piden)
+```bash
+hostnamectl set-hostname nuevo-nombre
+```
+
+---
+
+## MÓDULO II — USUARIOS, GRUPOS Y PERMISOS
+
+### Usuarios y grupos
+```bash
+sudo -i   # elevar a root para toda la sección
+
+# Crear usuario y añadir a grupo administrativo (wheel = sudo)
+useradd almeris
+passwd almeris
+usermod -aG wheel almeris
+
+# Crear grupo + usuario con grupo primario
+groupadd guest
+useradd -g guest invitado
+
+# Eliminar
+userdel -r invitado   # -r borra también /home
+groupdel guest
+
+# Verificación
+id almeris
+id invitado            # debe dar "no such user"
+groups almeris          # lista de grupos
+cat /etc/passwd | grep almeris   # confirmar entrada en el sistema
+cat /etc/group | grep wheel      # confirmar pertenencia a wheel
+```
+
+**Comandos adicionales útiles (por si el tema cambia):**
+```bash
+usermod -aG grupo1,grupo2 usuario   # añadir a varios grupos sin quitar los actuales
+usermod -G grupo1 usuario            # OJO: sin -a reemplaza TODOS los grupos secundarios
+gpasswd -d usuario grupo             # quitar usuario de un grupo
+chage -l usuario                     # ver política de expiración de contraseña
+usermod -L usuario                   # bloquear cuenta
+usermod -U usuario                   # desbloquear cuenta
+usermod -s /sbin/nologin usuario     # deshabilitar login
+```
+
+### Permisos de archivos
+```bash
+mkdir materia
+vi materia/estudiante.almeris
+# vi: presiona 'i' para insertar, Esc, ':wq' para guardar y salir
+
+# Formato octal
+chmod 700 materia/estudiante.almeris   # rwx solo dueño
+chmod 070 materia/estudiante.almeris   # rwx solo grupo
+chmod 007 materia/estudiante.almeris   # rwx solo otros
+chmod 777 materia/estudiante.almeris   # todos, todo
+
+# Formato simbólico (alternativa si piden explicar)
+chmod u+rwx,g-rwx,o-rwx materia/estudiante.almeris
+chmod u=rwx,g=,o= materia/estudiante.almeris
+
+mkdir materia2
+cp materia/estudiante.almeris materia2/
+rm -rf materia
+
+# Verificación
+ls -l materia2/
+ls -l
+```
+
+**Propietario y grupo de archivos:**
+```bash
+chown usuario archivo             # cambiar dueño
+chown usuario:grupo archivo       # cambiar dueño y grupo
+chgrp grupo archivo               # cambiar solo grupo
+chown -R usuario:grupo carpeta/   # recursivo
+```
+
+---
+
+## MÓDULO — GESTIÓN DE PAQUETES Y TAREAS PROGRAMADAS (RHEL)
+
+### Repositorio local desde ISO
+```bash
+mkdir -p /mnt/disc
+mount /dev/sr0 /mnt/disc
+nano /etc/yum.repos.d/local.repo
+# [base]
+# name=BaseOS
+# baseurl=file:///mnt/disc/BaseOS
+# enabled=1
+# gpgcheck=0
+# [app]
+# name=AppStream
+# baseurl=file:///mnt/disc/AppStream
+# enabled=1
+# gpgcheck=0
+
+dnf clean all
+dnf upgrade -y
+dnf repolist
+dnf search bashtop
+```
+
+**Comandos dnf adicionales:**
+```bash
+dnf install paquete -y
+dnf remove paquete -y
+dnf list installed | grep paquete
+dnf info paquete
+dnf history                 # historial de transacciones
+dnf history undo <id>       # deshacer una transacción
+```
+
+### Script + Makefile como instalador
+```bash
+mkdir bashtop && cd bashtop
+nano bashtop
+# #!/bin/bash
+# echo "=== MONITOR BASHTOP: SISTEMA OK ==="
+
+nano Makefile
+# install:
+#   install -Dm755 bashtop /usr/bin/bashtop
+# uninstall:
+#   rm -f /usr/bin/bashtop
+
+make install
+bashtop
+make uninstall
+cd .. && rm -rf bashtop
+dnf autoremove -y
+```
+
+### Cron y at
+```bash
+crontab -e
+# 0 23 * * * dnf upgrade -y      -> minuto hora día mes día_semana
+# 0 3 * * 0 reboot                -> domingos a las 3am
+crontab -l
+crontab -r                        # borrar TODO el crontab del usuario
+
+# Formato cron: min(0-59) hora(0-23) día_mes(1-31) mes(1-12) día_semana(0-7, 0 y 7=domingo)
+# Ejemplo cada 5 min: */5 * * * *
+# Ejemplo cada hora: 0 * * * *
+
+at now + 1 minute
+# rm -rf /tmp/*
+# Ctrl+D para guardar
+atq          # ver cola de tareas at
+atrm <n>     # eliminar tarea at por número
+```
+
+### Particiones y montaje
+```bash
+lsblk
+mkfs.ext4 /dev/nvme0n1
+mkdir -p ~/Desktop/disco_local
+mount /dev/nvme0n1 ~/Desktop/disco_local
+umount /dev/nvme0n1
+mount /dev/nvme0n1 /mnt
+
+# Montaje persistente en fstab
+blkid /dev/nvme0n1                            # obtener UUID
+echo "UUID=xxxx /mnt/punto ext4 defaults 0 0" >> /etc/fstab
+mount -a                                       # probar fstab sin reiniciar
+df -h                                          # ver espacio y montajes
+```
+
+---
+
+## MÓDULO — GRUB, SCRIPTING, SSH CON LLAVES
+
+### Recuperar contraseña root vía GRUB
+```bash
+nano /etc/default/grub
+# GRUB_TIMEOUT=20
+grub2-mkconfig -o /boot/grub2/grub.cfg
+reboot
+
+# En el arranque: tecla "e" en GRUB -> ir a la línea "linux" -> agregar al final: init=/bin/sh
+# Ctrl+X para arrancar en modo emergencia
+mount -o remount,rw /
+passwd root
+touch /.autorelabel
+exec /sbin/init
+```
+
+### Scripts bash típicos
+```bash
+nano backup.sh
+# #!/bin/bash
+# fecha=$(date +"%d-%m-%Y:%H:%M")
+# tar -czf backup_$fecha.tar.gz /home/cris
+# echo "backup creado correctamente: backup_$fecha.tar.gz"
+chmod +x backup.sh
+./backup.sh
+
+nano ifconfig.sh
+# #!/bin/bash
+# echo "Ingrese el nombre del archivo: "
+# read nombre
+# ifconfig > $HOME/Desktop/$nombre.txt
+# echo "archivo creado correctamente."
+chmod +x ifconfig.sh
+./ifconfig.sh
+```
+
+**Estructuras bash comunes (por si piden algo distinto):**
+```bash
+# if
+if [ -f archivo.txt ]; then echo "existe"; else echo "no existe"; fi
+
+# for
+for i in {1..10}; do touch archivo$i.txt; done
+
+# while
+contador=0
+while [ $contador -lt 5 ]; do echo $contador; contador=$((contador+1)); done
+```
+
+### SSH con llaves
+```bash
+# Desde el host (Windows PowerShell)
+ipconfig
+ping 192.168.86.200
+ssh usuario@192.168.86.200
+exit
+
+ssh-keygen -t rsa -b 4096
+cat $env:USERPROFILE\.ssh\id_rsa.pub | ssh usuario@192.168.86.200 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+
+ssh usuario@192.168.86.200   # ya sin pedir contraseña
+```
+
+**Desde Linux (equivalente a lo anterior):**
+```bash
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+ssh-copy-id usuario@IP                      # forma más simple, hace todo automático
+# o manual:
+cat ~/.ssh/id_rsa.pub | ssh usuario@IP "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+```
+
+---
+
+## MÓDULO VI — SEGURIDAD
+
+### Cifrado GPG2
+```bash
+dnf install gnupg2 -y
+mkdir ~/practica_cifrado && cd ~/practica_cifrado
+echo "texto secreto" > secreto.txt
+gpg2 -c secreto.txt          # pide passphrase, cifrado simétrico
+
+cat secreto.txt.gpg          # ilegible
+rm -f secreto.txt
+gpg2 -d secreto.txt.gpg > secreto.txt
+cat secreto.txt
+```
+
+### Firewall e iptables
+```bash
+systemctl start sshd httpd vsftpd
+systemctl status sshd httpd vsftpd
+
+# iptables directo
+iptables -A INPUT -p tcp --dport 80 -j DROP
+iptables -A INPUT -p tcp --dport 21 -j DROP
+iptables -A INPUT -p tcp --dport 22 -j DROP
+iptables -L -n -v
+iptables -D INPUT -p tcp --dport 80 -j DROP    # -D borra la regla exacta (misma sintaxis que -A)
+iptables -D INPUT -p tcp --dport 21 -j DROP
+iptables -D INPUT -p tcp --dport 22 -j DROP
+iptables -F                                     # borra TODAS las reglas de golpe
+
+# firewalld con rich rules
+systemctl start firewalld
+firewall-cmd --permanent --add-rich-rule='rule family="ipv4" port port="80" protocol="tcp" reject'
+firewall-cmd --reload
+firewall-cmd --list-all
+firewall-cmd --permanent --remove-rich-rule='rule family="ipv4" port port="80" protocol="tcp" reject'
+firewall-cmd --reload
+
+# Comandos firewalld básicos adicionales
+firewall-cmd --get-active-zones
+firewall-cmd --add-port=8080/tcp --permanent
+firewall-cmd --add-service=http --permanent
+firewall-cmd --list-ports
+firewall-cmd --list-services
+```
+
+### tcpdump / snort (auditoría de red)
+```bash
+mkdir ~/practica_snort && cd ~/practica_snort
+cat << 'EOF' > snort.rules
+alert icmp any any -> any any (sid:1;)
+alert tcp any any -> any 21 (sid:2;)
+alert tcp any any -> any 22 (sid:3;)
+alert tcp any any -> any 80 (sid:4;)
+EOF
+
+systemctl stop firewalld
+tcpdump -i ens160 icmp
+tcpdump -i ens160 port 21
+tcpdump -i ens160 port 22
+tcpdump -i ens160 port 80
+
+# útiles adicionales
+tcpdump -i ens160 -c 20              # capturar solo 20 paquetes y parar
+tcpdump -i ens160 -w captura.pcap    # guardar a archivo para análisis posterior
+tcpdump -i ens160 host 192.168.1.5   # filtrar por host específico
+```
+
+### 2FA con Google Authenticator
+```bash
+dnf install google-authenticator -y
+google-authenticator          # asistente interactivo, guarda el QR/código
+
+echo "auth required pam_google_authenticator.so" >> /etc/pam.d/sshd
+
+sed -i 's/KbdInteractiveAuthentication no/KbdInteractiveAuthentication yes/g' /etc/ssh/sshd_config
+sed -i 's/PermitRootLogin no/PermitRootLogin yes/g' /etc/ssh/sshd_config
+sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/g' /etc/ssh/sshd_config
+
+passwd root
+systemctl restart sshd
+```
+
+---
+
+## MÓDULO VII — NFS Y SAMBA
+
+### Servidor NFS
+```bash
+mkdir -p /OS3
+touch /OS3/Adrian{1..100}.txt
+chmod -R 777 /OS3
+chown -R nobody:nobody /OS3
+
+echo "/OS3 192.168.124.0/24(rw,sync,no_subtree_check)" > /etc/exports
+exportfs -arv
+
+firewall-cmd --permanent --add-service=nfs
+firewall-cmd --permanent --add-service=rpc-bind
+firewall-cmd --permanent --add-service=mountd
+firewall-cmd --reload
+
+systemctl enable --now nfs-server rpcbind
+systemctl restart nfs-server
+
+exportfs -v          # verificación
+```
+
+### Cliente NFS
+```bash
+mkdir -p /mnt/OS3_cliente
+showmount -e 192.168.124.10
+mount -t nfs -o vers=3 192.168.124.10:/OS3 /mnt/OS3_cliente
+ls /mnt/OS3_cliente
+
+echo "192.168.124.10:/OS3 /mnt/OS3_cliente nfs defaults,vers=3,_netdev 0 0" >> /etc/fstab
+mount -a
+df -h /mnt/OS3_cliente
+```
+
+### Samba (compartir con Windows)
+```bash
+dnf install samba samba-client samba-common -y
+systemctl enable --now smb nmb
+
+mkdir -p /srv/samba/cris
+touch /srv/samba/cris/Cris{1..100}.txt
+chmod -R 777 /srv/samba/cris
+chown -R nobody:nobody /srv/samba/cris
+chcon -t samba_share_t /srv/samba/cris
+
+firewall-cmd --permanent --add-service=samba
+firewall-cmd --reload
+
+nano /etc/samba/smb.conf
+# [cris]
+# path = /srv/samba/cris
+# browsable = yes
+# writable = yes
+# guest ok = yes
+# read only = no
+
+groupadd samba_users
+useradd -m cris
+usermod -aG samba_users cris
+smbpasswd -a cris
+
+systemctl restart smb nmb
+
+# Verificación
+groups cris
+testparm                       # valida sintaxis de smb.conf
+
+# Desde Windows: \\IP_SERVIDOR\cris
+```
+
+### Samba 4 como controlador de dominio AD
+```bash
+hostnamectl set-hostname so3.inet
+echo "192.168.124.10 so3.inet inet" >> /etc/hosts
+
+mkdir -p /root/samba_build && cd /root/samba_build
+wget https://download.samba.org/pub/samba/stable/samba-4.16.2.tar.gz
+tar -zxvf samba-4.16.2.tar.gz
+cd samba-4.16.2
+
+dnf install epel-release -y
+dnf config-manager --set-enabled crb
+dnf install gcc make python3-devel gnutls-devel docbook-style-xsl libacl-devel openldap-devel bind-utils -y
+
+./configure
+make -j2
+make -j2 install
+
+echo "export PATH=/usr/local/samba/bin:/usr/local/samba/sbin:\$PATH" >> /etc/profile
+source /etc/profile
+
+samba-tool domain provision --realm=SO3.INET --domain=SO3 --server-role=dc --dns-backend=SAMBA_INTERNAL
+/usr/local/samba/sbin/samba
+
+systemctl stop firewalld
+systemctl disable firewalld
+dnf install iptables-services -y
+systemctl enable --now iptables
+iptables -A INPUT -p tcp -m multiport --dports 53,88,135,139,389,445,464,636,3268,3269 -j ACCEPT
+iptables -A INPUT -p udp -m multiport --dports 53,88,123,137,138,389,464 -j ACCEPT
+service iptables save
+
+# Verificación
+host -t SRV _ldap._tcp.so3.inet
+host -t SRV _kerberos._udp.so3.inet
+ping so3.inet
+```
+
+**Cliente Windows unido al dominio:**
+```
+Config avanzada del sistema -> Nombre de equipo -> Cambiar -> Miembro del dominio: so3.inet
+Autenticación: Administrator / <contraseña del dominio>
+Reiniciar y validar login con SO3\Administrator
+```
+
+---
+
+## MÓDULO — RSYNC Y ALTA DISPONIBILIDAD (Pacemaker/Corosync/Keepalived)
+
+### Rsync + cron
+```bash
+mkdir /root/datos_sincro
+touch /root/datos_sincro/archivo{1..100}.txt
+
+echo -e '#!/bin/bash\nrsync -avz --delete /root/datos_sincro/ usuario@192.168.124.133:/home/usuario/datos_sincro/' > /root/sincronizar.sh
+chmod +x /root/sincronizar.sh
+
+crontab -e
+# * * * * * /root/sincronizar.sh > /dev/null 2>&1
+
+touch /root/datos_sincro/archivo_prueba_cron.txt
+# En máquina 2, tras 1 min:
+ls /home/usuario/datos_sincro/
+```
+
+**Flags útiles de rsync:**
+```bash
+rsync -avz origen/ destino/     # -a=archivo(preserva permisos), -v=verbose, -z=comprime
+rsync -avz --delete origen/ destino/   # borra en destino lo que no está en origen
+rsync -avz -e ssh origen/ usuario@IP:/ruta/   # forzar túnel SSH
+```
+
+### Pacemaker + Corosync (clúster HA)
+```bash
+passwd hacluster
+systemctl enable --now pcsd
+
+# Solo en Máquina 1:
+pcs host auth nodo1 nodo2 -u hacluster
+pcs cluster setup mi_cluster nodo1 nodo2 --force
+pcs cluster start --all
+pcs cluster enable --all
+pcs property set stonith-enabled=false
+pcs property set no-quorum-policy=ignore
+pcs resource create vip_cluster ocf:heartbeat:IPaddr2 ip=192.168.124.150 cidr_netmask=24 op monitor interval=30s
+pcs status
+
+# Comandos adicionales útiles
+pcs resource move vip_cluster nodo2     # forzar failover manual
+pcs resource cleanup vip_cluster        # limpiar estado de error de un recurso
+pcs cluster stop --all
+```
+
+### Keepalived (VRRP, IP flotante web)
+```bash
+# Máquina 1 (MASTER, prioridad 100)
+echo "<h1>Bienvenidos a: Server 1</h1>" > /var/www/html/sitio80/index.html
+systemctl restart httpd
+
+nano /etc/keepalived/keepalived.conf
+# global_defs { router_id nodo1 }
+# vrrp_instance VI_1 {
+#   state MASTER
+#   interface ens160
+#   virtual_router_id 51
+#   priority 100
+#   advert_int 1
+#   authentication { auth_type PASS; auth_pass 1234 }
+#   virtual_ipaddress { 192.168.124.180/24 }
+# }
+
+systemctl enable --now keepalived
+systemctl status keepalived
+
+# Máquina 2 (BACKUP, prioridad 90, mismo bloque pero state BACKUP e interface distinta si aplica)
+```
+
+**Prueba de failover:** apaga el servicio en Máquina 1 (`systemctl stop keepalived`) y verifica que la IP virtual (192.168.124.180) pasa a responder desde Máquina 2 con `ip a` y `curl http://192.168.124.180`.
+
+---
+
+## MÓDULO VIII — DOCKER
+
+### Instalación y contenedor Nginx
+```bash
+sudo dnf install -y dnf-utils
+sudo dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+
+sudo docker pull nginx
+sudo mkdir -p /home/website
+sudo docker run -d -p 8888:80 -v /home/website:/usr/share/nginx/html:Z --name mi_web nginx
+
+cat << 'EOF' | sudo tee /home/website/index.html
+<!DOCTYPE html>
+<html><body><h1>Práctica Docker - Cris Almeris Zanellato</h1></body></html>
+EOF
+```
+
+**Comandos docker básicos que suelen pedir en el examen:**
+```bash
+docker ps                    # contenedores corriendo
+docker ps -a                 # todos, incluso detenidos
+docker images                # imágenes descargadas
+docker stop <nombre>
+docker start <nombre>
+docker restart <nombre>
+docker rm <nombre>           # eliminar contenedor (debe estar detenido)
+docker rmi <imagen>          # eliminar imagen
+docker logs <nombre>         # ver logs del contenedor
+docker exec -it <nombre> bash   # entrar a la terminal del contenedor
+docker inspect <nombre>      # detalles completos (IP, volúmenes, etc.)
+docker stats                 # uso de CPU/RAM en tiempo real
+```
+
+### Portainer (gestión visual)
+```bash
+sudo docker volume create portainer_data
+sudo docker run -d -p 8000:8000 -p 9443:9443 --name portainer --restart=always \
+  -v /var/run/docker.sock:/var/run/docker.sock:Z -v portainer_data:/data:Z \
+  portainer/portainer-ce:latest --no-setup-token
+
+# Acceder: https://127.0.0.1:9443 -> crear admin/contraseña -> vincular Docker local
+curl http://127.0.0.1:8888     # verificar que el sitio de nginx sigue activo
+```
+
+### WordPress con Docker Compose
+```bash
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+
+mkdir -p /home/wordpress_compose && cd /home/wordpress_compose
+cat << 'EOF' > docker-compose.yml
+version: '3.8'
+services:
+  db:
+    image: mysql:8.0
+    container_name: wordpress_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password_123
+      MYSQL_DATABASE: wordpress_db
+      MYSQL_USER: wp_user
+      MYSQL_PASSWORD: wp_password_123
+    volumes:
+      - db_data:/var/lib/mysql:Z
+  wordpress:
+    image: wordpress:latest
+    container_name: wordpress_app
+    restart: always
+    depends_on:
+      - db
+    ports:
+      - "8080:80"
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wp_user
+      WORDPRESS_DB_PASSWORD: wp_password_123
+      WORDPRESS_DB_NAME: wordpress_db
+    volumes:
+      - wp_data:/var/www/html:Z
+volumes:
+  db_data:
+  wp_data:
+EOF
+
+sudo docker-compose up -d
+```
+
+**Comandos docker-compose adicionales:**
+```bash
+docker-compose ps           # estado de los servicios
+docker-compose logs         # logs de todos los servicios
+docker-compose down         # detener y eliminar contenedores (mantiene volúmenes)
+docker-compose down -v      # eliminar también volúmenes
+docker-compose restart      # reiniciar servicios
+```
+
+---
+
+## MÓDULO IX — WEBMIN, TERRAFORM, ANSIBLE
+
+### Webmin
+```bash
+cat << 'EOF' | sudo tee /etc/yum.repos.d/webmin.repo
+[Webmin]
+name=Webmin Distribution Neutral
+baseurl=https://download.webmin.com/download/yum
+enabled=1
+gpgcheck=1
+gpgkey=https://download.webmin.com/jcameron-key.asc
+EOF
+
+sudo dnf install -y webmin
+sudo systemctl enable --now webmin
+sudo firewall-cmd --add-port=10000/tcp --permanent
+sudo firewall-cmd --reload
+# Acceder: https://<IP_RHEL>:10000  (login root)
+```
+
+### Terraform + DigitalOcean
+```bash
+sudo dnf install -y yum-utils
+sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo
+sudo dnf install -y terraform
+
+mkdir -p /home/terraform_do && cd /home/terraform_do
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+
+cat << 'EOF' > main.tf
+terraform {
+  required_providers {
+    digitalocean = { source = "digitalocean/digitalocean"; version = "~> 2.0" }
+  }
+}
+provider "digitalocean" { token = var.do_token }
+variable "do_token" {}
+resource "digitalocean_ssh_key" "default" {
+  name = "ansible-controller-key"
+  public_key = file("~/.ssh/id_rsa.pub")
+}
+resource "digitalocean_droplet" "OS3vm" {
+  image = "ubuntu-22-04-x64"
+  name = "OS3vm"
+  region = "nyc1"
+  size = "s-1vcpu-1gb"
+  ssh_keys = [digitalocean_ssh_key.default.fingerprint]
+}
+output "ip_address" { value = digitalocean_droplet.OS3vm.ipv4_address }
+EOF
+
+terraform init
+terraform apply -var="do_token=TU_TOKEN" -auto-approve
+```
+
+**Comandos terraform adicionales:**
+```bash
+terraform plan                  # ver qué se va a crear/cambiar sin aplicar
+terraform destroy -auto-approve # eliminar todo lo creado
+terraform show                  # ver el estado actual
+terraform output                # ver los outputs definidos (ej. ip_address)
+```
+
+### Ansible
+```bash
+sudo dnf install -y epel-release
+sudo dnf install -y ansible
+pip3 install pywinrm
+
+sudo useradd -m ansible
+echo "ansible ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/ansible
+sudo su - ansible -c "ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ''"
+
+cat /home/ansible/.ssh/id_rsa.pub | ssh root@IP_REMOTA "useradd -m ansible 2>/dev/null; echo 'ansible ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/ansible; mkdir -p /home/ansible/.ssh && cat >> /home/ansible/.ssh/authorized_keys && chown -R ansible:ansible /home/ansible/.ssh && chmod 700 /home/ansible/.ssh && chmod 600 /home/ansible/.ssh/authorized_keys"
+
+sudo rm -rf /etc/ansible/hosts
+cat << 'EOF' | sudo tee /etc/ansible/hosts
+[linux]
+IP_REMOTA ansible_user=ansible
+
+[win]
+IP_WINDOWS ansible_user=ansible ansible_password=CONTRASEÑA ansible_connection=winrm ansible_winrm_transport=basic ansible_port=5985 ansible_winrm_server_cert_validation=ignore
+EOF
+
+sudo su - ansible -c "ansible linux -m ping"
+sudo su - ansible -c "ansible win -m win_ping"
+```
+
+**Config Windows (WinRM) — ejecutar en PowerShell admin del cliente Windows:**
+```powershell
+Enable-PSRemoting -Force
+Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value true
+Set-Item WSMan:\localhost\Service\Auth\Basic -Value true
+New-NetFirewallRule -Name "WinRM-HTTP" -DisplayName "WinRM HTTP" -Protocol TCP -LocalPort 5985 -Action Allow
+net user ansible password123* /add
+net localgroup Administrators ansible /add
+```
+
+### Comandos ad-hoc
+```bash
+sudo su - ansible -c "ansible win -m win_copy -a 'src=C:/Users/ansible/Desktop/prueba.txt dest=C:/Users/ansible/Documents/prueba.txt remote_src=yes'"
+sudo su - ansible -c "ansible linux -b -m reboot"
+
+# Otros módulos ad-hoc útiles
+sudo su - ansible -c "ansible linux -b -m yum -a 'name=nginx state=present'"
+sudo su - ansible -c "ansible linux -b -m service -a 'name=nginx state=started enabled=yes'"
+sudo su - ansible -c "ansible linux -a 'uptime'"           # comando arbitrario
+sudo su - ansible -c "ansible linux -b -m copy -a 'src=/tmp/archivo.txt dest=/home/ansible/archivo.txt'"
+```
+
+### Playbooks
+```yaml
+# install_nginx.yml (Linux)
+---
+- name: Instalar y configurar NGINX en Linux
+  hosts: linux
+  become: yes
+  tasks:
+    - name: Actualizar repositorios e instalar NGINX
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+        update_cache: yes
+    - name: Iniciar y habilitar el servicio NGINX
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: yes
+```
+```yaml
+# install_notepad.yml (Windows)
+---
+- name: Instalar Notepad++ en Windows
+  hosts: win
+  tasks:
+    - name: Descargar e instalar Notepad++ mediante Chocolatey
+      chocolatey.chocolatey.win_chocolatey:
+        name: notepadplusplus
+        state: present
+```
+```bash
+sudo su - ansible -c "ansible-playbook /etc/ansible/install_nginx.yml"
+sudo su - ansible -c "ansible-playbook /etc/ansible/install_notepad.yml"
+curl http://IP_REMOTA          # verificar nginx respondiendo
+```
+
+---
+
+## TROUBLESHOOTING RÁPIDO (comandos de diagnóstico general)
+
+```bash
+systemctl status <servicio>          # ver si un servicio está activo/fallando
+journalctl -xeu <servicio>           # ver logs detallados de un servicio
+journalctl -f                        # logs en tiempo real
+systemctl daemon-reload              # tras editar un .service manualmente
+ss -tulpn                            # ver puertos abiertos y qué proceso los usa (reemplazo moderno de netstat)
+getenforce                           # ver estado de SELinux (Enforcing/Permissive/Disabled)
+setenforce 0                         # poner SELinux en modo permisivo temporalmente (para descartar bloqueos)
+ausearch -m avc -ts recent           # ver denegaciones recientes de SELinux
+firewall-cmd --state                 # ver si firewalld está activo
+systemctl list-units --failed        # ver todos los servicios que fallaron al iniciar
