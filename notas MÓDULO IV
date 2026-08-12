@@ -1,0 +1,151 @@
+MÓDULO IV
+Práctica 1 — Servidor HTTP Apache (httpd)
+Página 15 de 43
+1. Instalación desde cero
+sudo dnf install -y httpd
+sudo systemctl enable --now httpd
+sudo firewall-cmd --permanent --add-service=http
+sudo firewall-cmd --permanent --add-port=8080/tcp
+sudo firewall-cmd --reload
+2. Website "Hola Mundo" en puerto 80 (host virtual)
+sudo mkdir -p /var/www/holamundo
+echo "<h1>Hola Mundo</h1>" | sudo tee /var/www/holamundo/index.html
+Crear el host virtual: /etc/httpd/conf.d/holamundo.conf
+sudo nano /etc/httpd/conf.d/holamundo.conf
+<VirtualHost *:80>
+DocumentRoot /var/www/holamundo
+ServerName holamundo.local
+<Directory /var/www/holamundo>
+AllowOverride All
+Require all granted
+</Directory>
+</VirtualHost>
+3. Website con nombre/matrícula/materia en puerto 8080
+sudo mkdir -p /var/www/datospersonales
+echo "<h1>Nombre: Cris | Matricula: 2025-2285 | Materia: Sistemas Operativos III</h1>" | sudo tee /
+var/www/datospersonales/index.html
+Agregar el listener del puerto 8080 en /etc/httpd/conf/httpd.conf (o en el propio conf.d):
+sudo nano /etc/httpd/conf.d/datospersonales.conf
+Listen 8080
+<VirtualHost *:8080>
+DocumentRoot /var/www/datospersonales
+ServerName datospersonales.local
+<Directory /var/www/datospersonales>
+AllowOverride All
+Require all granted
+</Directory>
+</VirtualHost>
+4. SELinux y permisos (crítico en RHEL)
+sudo chcon -R -t httpd_sys_content_t /var/www/holamundo /var/www/datospersonales
+sudo semanage port -a -t http_port_t -p tcp 8080 # si el puerto 8080 no está permitido
+sudo systemctl restart httpd
+Página 16 de 43
+Verificación:
+sudo apachectl configtest
+curl http://localhost
+curl http://localhost:8080
+sudo ss -tulnp | grep httpd
+sudo firewall-cmd --list-ports
+sudo firewall-cmd --list-services
+Qué hacer si falla:
+403 Forbidden → falta contexto SELinux: sudo chcon -R -t httpd_sys_content_t /var/www/
+carpeta y verificar permisos 755 en carpetas, 644 en archivos.
+No conecta al puerto 8080 → falta abrir puerto en firewalld Y en la policy SELinux con semanage
+port . Instalar semanage si falta: sudo dnf install -y policycoreutils-python-utils
+Apache no arranca → sudo apachectl configtest para ver errores de sintaxis; revisar logs:
+sudo tail -50 /var/log/httpd/error_log
+Puerto ya en uso → sudo ss -tulnp | grep 8080 para identificar qué proceso lo ocupa.
+•
+•
+•
+•
+Página 17 de 43
+Práctica 2 — Servidor de correo Postfix
+1. Instalar Postfix
+sudo dnf install -y postfix mailx cyrus-sasl-plain
+sudo systemctl enable --now postfix
+2. Configurar relay externo (Gmail) para poder enviar correo real
+Ruta: /etc/postfix/main.cf
+sudo nano /etc/postfix/main.cf
+relayhost = [smtp.gmail.com]:587
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_sasl_security_options = noanonymous
+smtp_tls_security_level = encrypt
+smtp_tls_CAfile = /etc/ssl/certs/ca-bundle.crt
+sudo nano /etc/postfix/sasl_passwd
+[smtp.gmail.com]:587 tucorreo@gmail.com:tu_contraseña_de_aplicacion
+sudo postmap /etc/postfix/sasl_passwd
+sudo chmod 600 /etc/postfix/sasl_passwd /etc/postfix/sasl_passwd.db
+sudo systemctl restart postfix
+Nota: Gmail requiere "contraseña de aplicación" (App Password) con verificación en 2 pasos activada, no
+la contraseña normal de la cuenta.
+3. Enviar el correo de prueba
+echo "Cris - Matricula 2025-2285" | mail -s "MambruSeFueALaGuerra" os3conadrian@gmail.com
+Verificación:
+systemctl status postfix
+mailq
+sudo tail -30 /var/log/maillog
+Qué hacer si falla:
+mail: command not found → sudo dnf install -y mailx
+Correo se queda en cola → mailq y revisar /var/log/maillog para el error exacto (auth, TLS,
+DNS).
+Gmail rechaza autenticación → confirmar App Password válido y que "Acceso de apps menos
+seguras" no aplica (usar App Password, es obligatorio con 2FA).
+Firewall bloquea salida al 587 → sudo firewall-cmd --permanent --add-port=587/tcp && sudo
+firewall-cmd --reload
+•
+•
+•
+•
+Página 18 de 43
+Práctica 3 — Servidor de impresión CUPS
+1. Instalar CUPS
+sudo dnf install -y cups cups-pdf
+sudo systemctl enable --now cups
+sudo firewall-cmd --permanent --add-service=ipp
+sudo firewall-cmd --permanent --add-port=631/tcp
+sudo firewall-cmd --reload
+2. Permitir administración remota
+sudo nano /etc/cups/cupsd.conf
+Port 631
+Listen /run/cups/cups.sock
+Browsing On
+Allow @LOCAL
+<Location />
+Order allow,deny
+Allow @LOCAL
+</Location>
+<Location /admin>
+Order allow,deny
+Allow @LOCAL
+</Location>
+sudo usermod -aG sys $(whoami)
+sudo systemctl restart cups
+3. Instalar impresora virtual PDF y configurarla en CUPS
+sudo dnf install -y cups-pdf
+# Acceder al panel web: https://IP_DEL_SERVIDOR:631
+# Administration -> Add Printer -> seleccionar "CUPS-PDF (Virtual PDF Printer)"
+# Nombre: PDFPrinter -> Continue -> Add Printer -> Compartir: Share this printer -> OK
+4. Instalar la impresora en el PC cliente (Windows)
+Panel de Control → Dispositivos e impresoras → Agregar impresora → "La impresora que quiero no está en la
+lista" → Seleccionar por nombre compartido:
+\\IP_DEL_SERVIDOR\PDFPrinter
+# o vía IPP:
+http://IP_DEL_SERVIDOR:631/printers/PDFPrinter
+5. Probar impresión desde Word
+Abrir un documento de Word en el cliente → Imprimir → Seleccionar la impresora PDFPrinter → Imprimir. El
+archivo resultante se genera en el servidor en /var/spool/cups-pdf/usuario/ .
+Página 19 de 43
+Verificación:
+systemctl status cups
+lpstat -p -d
+ls /var/spool/cups-pdf/*/
+sudo firewall-cmd --list-ports
+Qué hacer si falla:
+No se ve la impresora desde Windows → confirmar que Browsing On esté activo y el firewall
+permita el puerto 631/tcp y el servicio ipp .
+No se genera el PDF → revisar permisos de /var/spool/cups-pdf/ y logs: sudo tail -30 /var/
+log/cups/error_log
+Acceso denegado al panel /admin → revisar la directiva Allow @LOCAL y que el usuario esté en el
+grupo sys o lpadmin .
