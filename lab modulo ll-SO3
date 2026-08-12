@@ -83,3 +83,170 @@ umount /dev/nvme0n1
 mount /dev/nvme0n1 /mnt
 cd /mnt
 ls -l
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ================================================================================
+GUÍA COMPLETA Y BITÁCORA DE LABORATORIO - MÓDULO II (RHEL 9/10)
+Cris Almeris Zanellato Lorenzo | Matrícula: 2025-2285 | Docente: Adrián Alcántara
+
+---
+
+## PRÁCTICA 1: PAQUETES, REPOSITORIOS Y COMPILACIÓN (MAKEFILE)
+
+1. CONFIGURACIÓN DEL REPOSITORIO LOCAL (ISO RHEL 10):
+mkdir -p /mnt/disc
+mount /dev/sr0 /mnt/disc
+# Crear el archivo local.repo (SIN caracteres '#' al inicio):
+
+
+cat << 'EOF' > /etc/yum.repos.d/local.repo
+[base]
+name=BaseOS
+baseurl=file:///mnt/disc/BaseOS
+enabled=1
+gpgcheck=0
+[app]
+name=AppStream
+baseurl=file:///mnt/disc/AppStream
+enabled=1
+gpgcheck=0
+EOF
+# Limpieza, actualización y verificación:
+
+
+dnf clean all
+dnf upgrade -y
+dnf repolist
+dnf search bashtop
+2. CREACIÓN, COMPILACIÓN Y DESINSTALACIÓN MANUAL (bashtop):
+mkdir bashtop && cd bashtop
+# A. Crear el script ejecutable:
+
+
+cat << 'EOF' > bashtop
+#!/bin/bash
+echo "=== MONITOR BASHTOP: SISTEMA OK ==="
+EOF
+# B. Crear el archivo Makefile (IMPORTANTE: usar 'TAB' antes de install y rm):
+
+
+cat << 'EOF' > Makefile
+install:
+install -Dm755 bashtop /usr/bin/bashtop
+uninstall:
+rm -f /usr/bin/bashtop
+EOF
+# C. Proceso de compilación, ejecución y borrado:
+
+
+make install                  # Copia el binario a /usr/bin/bashtop
+bashtop                       # Ejecuta el script instalado
+make uninstall                # Elimina el binario de /usr/bin/bashtop
+cd .. && rm -rf bashtop       # Borra la carpeta del código fuente
+dnf autoremove -y             # Limpia dependencias no utilizadas
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 1:
+* Error `mount: /mnt/disc: Can't open blockdev`: La ISO no está conectada en VMware. Ve a VMware -> Settings -> CD/DVD -> Marca "Connected" y "Connect at power on" y confirma la ISO `rhel-10.0-x86_64-dvd.iso`.
+* Error `Makefile: missing separator`: Reemplaza los espacios antes de `install` y `rm` dentro del Makefile por una tabulación física (tecla TAB).
+* Error `make: command not found`: Ejecuta `dnf install -y make` (requiere la ISO montada en `/mnt/disc`).
+* Error en `dnf upgrade`: Si las líneas en `/etc/yum.repos.d/local.repo` tienen el signo `#` al inicio, `dnf` las ignora. Vuelve a generar el archivo usando el bloque `cat` de arriba.
+
+
+
+---
+
+## PRÁCTICA 2: AUTOMATIZACIÓN Y TAREAS PROGRAMADAS (CRON Y AT)
+
+1. CONFIGURACIÓN DE TAREAS RECURRENTES (CRON):
+crontab -e                    # Abre el editor interactivo de cron
+# Líneas exactas a agregar dentro del editor:
+
+
+0 23 * * * dnf upgrade -y     # Actualización automática a las 11:00 PM todos los días
+0 3 * * 0 reboot              # Reinicio del sistema los domingos a las 3:00 AM
+# Verificación y revisión del directorio /tmp:
+
+
+crontab -l                    # Muestra las tareas programadas
+ls /tmp                       # Revisa el contenido de /tmp antes de at
+2. TAREA ÚNICA CON AT:
+at now + 1 minute             # Programa ejecución en 1 minuto
+# Escribir en la línea de comandos de at:
+
+
+rm -rf /tmp/*
+# Presionar 'Ctrl + D' para guardar y finalizar.
+
+
+# Verificación:
+
+
+atq                           # Muestra la cola de tareas programadas
+sleep 60                      # Espera 60 segundos
+ls /tmp                       # Confirma que /tmp fue vaciado
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 2:
+* La tarea `at` no se ejecuta tras el minuto: El servicio está inactivo. Actívalo con `systemctl enable --now atd`.
+* Error al guardar `crontab -e`: Si no sabes usar `vi` dentro de crontab, presiona `Esc`, escribe `:wq` y Enter.
+* Cancelar una tarea programada por error: En `at` usa `atq` para ver el ID y `atrm <ID>` para borrarla. En `cron` usa `crontab -r` para limpiar la tabla.
+
+
+
+---
+
+## PRÁCTICA 3: GESTIÓN DE DISCOS Y PUNTOS DE MONTAJE
+
+1. IDENTIFICACIÓN Y FORMATO DE DISCO:
+lsblk                         # Muestra los discos y particiones del sistema
+mkfs.ext4 /dev/nvme0n1        # Formatea el disco en ext4 (Ajustar nombre según lsblk)
+2. PRIMER MONTAJE (EN ESCRITORIO):
+mkdir -p ~/Desktop/disco_local
+mount /dev/nvme0n1 ~/Desktop/disco_local
+cd ~/Desktop/disco_local
+touch AdrianAlcantara.txt
+ls -l                         # Confirma la creación del archivo
+3. SEGUNDO MONTAJE (EN /mnt):
+cd ~                          # OBLIGATORIO: Salir del punto de montaje antes de desmontar
+umount /dev/nvme0n1           # Desmonta el disco del Escritorio
+mount /dev/nvme0n1 /mnt       # Vuelve a montar el disco en /mnt
+cd /mnt
+ls -l                         # Confirma que AdrianAlcantara.txt sigue ahí
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 3:
+* Error `target is busy` al ejecutar `umount`: Estás ubicado dentro del directorio montado en la terminal. Ejecuta `cd ~` y vuelve a correr `umount`.
+* No aparece `/dev/nvme0n1`: El nombre del disco depende del controlador en VMware. Usa `lsblk` para verificar si tu disco se llama `/dev/sdb`, `/dev/sdc` o `/dev/nvme0n1` y usa ese nombre en los comandos.
+* Error de permisos al escribir en `/mnt`: Asegúrate de estar ejecutando los comandos con la cuenta `root` (`sudo -i`).
+
+
+
+---
+
+## LIMPIEZA DE MÁQUINA (SI SE REQUIERE ENTREGAR LIMPIA/DE FÁBRICA)
+
+# umount /mnt 2>/dev/null
+umount /mnt/disc 2>/dev/null
+history -c && history -w
+clear
