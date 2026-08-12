@@ -65,3 +65,155 @@ cat $env:USERPROFILE\.ssh\id_rsa.pub | ssh alzzzzzc@192.168.86.200 "mkdir -p ~/.
 
 # Prueba final de conexión directa (Entrada automática sin contraseña):
 ssh alzzzzzc@192.168.86.200
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ================================================================================
+GUÍA COMPLETA Y BITÁCORA DE LABORATORIO - MÓDULO III (RHEL 9/10)
+Cris Almeris Zanellato Lorenzo | Matrícula: 2025-2285 | Docente: Adrián Alcántara
+
+---
+
+## PRÁCTICA 1: CONFIGURACIÓN DE GRUB Y RECUPERACIÓN DE CONTRASEÑA DE ROOT
+
+1. CONFIGURACIÓN DEL TIEMPO DE ESPERA (TIMEOUT):
+# A. Ajustar la variable GRUB_TIMEOUT a 20 segundos en el archivo principal:
+
+
+cat << 'EOF' > /etc/default/grub
+GRUB_TIMEOUT=20
+GRUB_DISTRIBUTOR="$(sed 's, release .*$,,g' /etc/system-release)"
+GRUB_DEFAULT=saved
+GRUB_DISABLE_SUBMENU=true
+GRUB_TERMINAL_OUTPUT="console"
+GRUB_CMDLINE_LINUX="resume=/dev/mapper/rhel-swap rd.lvm.lv=rhel/root rd.lvm.lv=rhel/swap rhgb quiet"
+GRUB_DISABLE_RECOVERY="true"
+GRUB_ENABLE_BLSCFG=true
+EOF
+# B. Regenerar la configuración de GRUB e iniciar reinicio:
+
+
+grub2-mkconfig -o /boot/grub2/grub.cfg
+reboot
+2. PROCEDIMIENTO DE RECUPERACIÓN DE CONTRASEÑA DE ROOT (CONSOLA DE EMERGENCIA):
+# Pasos en pantalla al arrancar el equipo:
+
+
+# 1. En el menú inicial de GRUB, presionar la tecla 'e' sobre la entrada principal.
+
+
+# 2. Ir al final de la línea que comienza con 'linux' y agregar: init=/bin/sh
+
+
+# 3. Presionar 'Ctrl + X' para iniciar la consola de emergencia en modo shell.
+
+
+# Comandos a ejecutar dentro de la consola de emergencia:
+
+
+mount -o remount,rw /              # Remonta la partición raíz en modo lectura/escritura
+passwd root                         # Asigna la nueva contraseña a root
+touch /.autorelabel                 # OBLIGATORIO: Fuerza a SELinux a reetiquetar el sistema
+exec /sbin/init                     # Reinicia el sistema e inicia en modo normal
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 1:
+* El sistema se queda en bucle o no permite loguearse tras cambiar la contraseña: Se omitió el comando `touch /.autorelabel`. SELinux bloquea el acceso si `/etc/shadow` cambia de contexto. Vuelve a entrar por `init=/bin/sh` y ejecuta `touch /.autorelabel`.
+* Error al ejecutar `grub2-mkconfig`: Si el sistema usa arranque UEFI en lugar de BIOS legacy, la ruta de salida puede requerir: `grub2-mkconfig -o /boot/efi/EFI/redhat/grub.cfg`.
+
+
+
+---
+
+## PRÁCTICA 2: SCRIPTING EN BASH (BACKUP Y CAPTURA DE RED)
+
+1. SCRIPT DE RESPALDO COMPRIMIDO (`backup.sh`):
+cat << 'EOF' > backup.sh
+#!/bin/bash
+fecha=$(date +"%d-%m-%Y:%H:%M")
+tar -czf backup_$fecha.tar.gz /home/cris
+echo "backup creado correctamente: backup_$fecha.tar.gz"
+EOF
+chmod +x backup.sh
+./backup.sh
+ls -l backup_*.tar.gz               # VERIFICACIÓN: Muestra el archivo tar.gz generado
+2. SCRIPT INTERACTIVO DE RED (`ifconfig.sh`):
+cat << 'EOF' > ifconfig.sh
+#!/bin/bash
+echo "Ingrese el nombre del archivo: "
+read nombre
+ip addr > $HOME/Desktop/$nombre.txt
+echo "archivo creado correctamente."
+EOF
+chmod +x ifconfig.sh
+./ifconfig.sh
+ls $HOME/Desktop/                   # VERIFICACIÓN: Muestra el archivo creado en el Escritorio
+cat $HOME/Desktop/*.txt             # VERIFICACIÓN: Muestra el contenido del reporte de red
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 2:
+* Error `Permission denied` al intentar correr el script: Ovidaste otorgar permisos de ejecución. Corre `chmod +x nombre_script.sh`.
+* Error `ifconfig: command not found`: En RHEL 9/10 la herramienta `ifconfig` está obsoleta. Usa `ip addr` en el script o instala el paquete legado con `dnf install -y net-tools`.
+* Error `No such file or directory` al guardar en Escritorio: Verifica que exista el directorio con `mkdir -p $HOME/Desktop`.
+
+
+
+---
+
+## PRÁCTICA 3: ACCESO SSH Y AUTENTICACIÓN POR LLAVE PÚBLICA (WINDOWS A RHEL)
+
+1. COMPROBACIÓN INICIAL DESDE WINDOWS (POWERSHELL / CMD):
+ipconfig
+ping 192.168.86.200                 # Comprobar alcance a la VM de RHEL
+ssh alzzzzzc@192.168.86.200         # Probar conexión por contraseña
+exit
+2. GENERACIÓN Y TRANSFERENCIA AUTOMATIZADA DE LLAVES:
+# En Windows PowerShell:
+
+
+ssh-keygen -t rsa -b 4096            # Generar par de llaves (Presionar Enter a todo)
+# Copiar la llave pública directamente al servidor RHEL (En una sola línea):
+
+
+cat $env:USERPROFILE.ssh\id_rsa.pub | ssh alzzzzzc@192.168.86.200 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+3. PRUEBA DE CONEXIÓN DIRECTA (SIN CONTRASEÑA):
+ssh alzzzzzc@192.168.86.200         # Entrada automática directa al entorno del servidor
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 3:
+* Sigue pidiendo contraseña al conectar por SSH: Permisos incorrectos en RHEL. Conéctate y ejecuta: `chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys`.
+* Error `Connection refused` o timeout: El servicio SSH está detenido o el firewall lo bloquea en RHEL. En la VM ejecuta: `systemctl enable --now sshd` y `firewall-cmd --zone=public --add-service=ssh --permanent && firewall-cmd --reload`.
+
+
+
+---
+
+## LIMPIEZA DE MÁQUINA (SI SE REQUIERE ENTREGAR LIMPIA/DE FÁBRICA)
+
+# rm -f backup.sh ifconfig.sh backup_*.tar.gz 2>/dev/null
+history -c && history -w
+clear
