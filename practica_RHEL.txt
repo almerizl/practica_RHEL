@@ -123,3 +123,171 @@ ls -l materia2/   # Comprueba los permisos (---rwx---) y la existencia del clon
 ls -l             # Comprueba que la carpeta 'materia' fue eliminada por completo
 ================================================================================
 
+
+
+
+
+
+
+
+
+
+# ================================================================================
+GUÍA DEFINITIVA Y REPORTE DE LABORATORIO (RHEL 9 / 10)
+Cris Almeris Zanellato Lorenzo | Matrícula: 2025-2285
+
+---
+
+## PRÁCTICA 1: INSTALACIÓN Y AJUSTES DE VMWARE
+
+1. REQUISITOS Y RECURSOS DE LA VM:
+* CPU: 2 vCPUs
+* RAM: 4 GB
+* Disco: 20 GB (Dinámico)
+* Red: Adaptador en modo "Bridge" (Puente) o "NAT"
+* Software: Servidor con GUI (Server with GUI)
+
+
+2. PROCEDIMIENTO DE CLONACIÓN COMPLETA:
+* Apagar la VM por completo: poweroff
+* En VMware Workstation: Clic derecho en la VM -> Manage -> Clone...
+* Selección: "The current state in the virtual machine" -> "Create a full clone"
+* Asignar nombre (ej: RHEL_Clon) y finalizar.
+
+
+3. RESOLUCIÓN DE ERRORES DE PANTALLA Y DISCO:
+* Pantalla gris / congelada:
+VMware -> VM Settings -> Hardware -> Display -> Desmarcar "Accelerate 3D graphics".
+*(Si persiste, en el menú GRUB inicial seleccionar: Troubleshooting -> Install in basic graphics mode).*
+* Error "Can't open blockdev" al intentar montar el CD:
+VMware -> VM Settings -> CD/DVD -> Marcar "Connected" y "Connect at power on" -> Seleccionar la ISO (rhel-10.0-x86_64-dvd.iso).
+
+
+
+---
+
+## PRÁCTICA 2: CONFIGURACIÓN DE RED Y REPOSITORIO LOCAL
+
+1. LÍNEA DE COMANDOS (nmcli):
+A) Modo DHCP (Automático):
+nmcli connection modify ens160 connection.autoconnect yes ipv4.method auto ipv4.addresses "" ipv4.gateway "" ipv4.dns ""
+nmcli connection up ens160
+B) Modo Estático (Manual):
+nmcli connection modify ens160 ipv4.method manual ipv4.addresses 192.168.1.150/24 ipv4.gateway 192.168.1.1 ipv4.dns "8.8.8.8 8.8.4.4"
+nmcli connection up ens160
+2. MÉTODOS ALTERNATIVOS DE RED:
+* Interfaz visual: nmtui -> Edit a connection -> ens160 -> Cambiar a Manual o Automatic -> Save -> Activate.
+* Archivo Keyfile directos: /etc/NetworkManager/system-connections/ens160.nmconnection
+*(Modificar bloque [ipv4] con method=manual/auto, recargar con 'sudo nmcli connection reload' y levantar con 'nmcli connection up ens160').*
+
+
+3. CONFIGURACIÓN DEL REPOSITORIO LOCAL (ISO):
+# Paso A: Montar la ISO en el punto de montaje
+
+
+mkdir -p /mnt/disc
+mount /dev/sr0 /mnt/disc
+ls /mnt/disc                    # VERIFICACIÓN: Debe mostrar BaseOS y AppStream
+# Paso B: Crear el archivo de configuración (Copiar bloque completo)
+
+
+cat << 'EOF' > /etc/yum.repos.d/local.repo
+[base]
+name=BaseOS
+baseurl=file:///mnt/disc/BaseOS
+enabled=1
+gpgcheck=0
+[app]
+name=AppStream
+baseurl=file:///mnt/disc/AppStream
+enabled=1
+gpgcheck=0
+EOF
+# Paso C: Limpiar caché y validar repositorios
+
+
+dnf clean all
+dnf repolist                    # VERIFICACIÓN: Muestra el conteo de paquetes de BaseOS y AppStream
+4. VERIFICACIÓN Y RESOLUCIÓN DE ERRORES DE RED:
+* Comandos de comprobación:
+ip addr show ens160           # Revisa IP y estado UP
+ip route show                 # Revisa Gateway
+ping -c 3 8.8.8.8             # Prueba salida a internet
+* Error "Destination Host Unreachable": La IP asignada no pertenece a la subred de tu Wi-Fi. Solución: Cambia la VM a modo NAT en VMware Settings o revisa el Gateway real con 'ipconfig' en Windows.
+* Error en DNF / Metadata: Ocurre si ejecutas 'dnf' con la ISO desconectada o si tu archivo .repo tiene símbolos '#' al inicio desactivando las líneas.
+
+
+
+---
+
+## PRÁCTICA 3: GESTIÓN DE USUARIOS, GRUPOS Y SERVICIOS (NFS)
+
+1. GESTIÓN DE USUARIOS Y GRUPOS:
+useradd almeris                               # Crear usuario
+passwd almeris                                # Asignar contraseña
+usermod -aG wheel almeris                     # Agregar al grupo administrativo (sudo)
+groupadd guest                                # Crear grupo
+useradd -g guest invitado                     # Crear usuario con grupo primario específico
+usermod -aG grupo1,grupo2 usuario             # Asignar múltiples grupos secundarios
+gpasswd -d usuario grupo1                     # Remover usuario de un grupo secundario
+usermod -L usuario                            # Bloquear usuario
+usermod -U usuario                            # Desbloquear usuario
+usermod -s /sbin/nologin usuario              # Quitar acceso a terminal
+userdel -r invitado                           # Eliminar usuario y su directorio /home
+groupdel guest                                # Eliminar grupo
+2. COMANDOS DE VERIFICACIÓN DE USUARIOS:
+id almeris                                    # Muestra UID, GID y grupos
+groups almeris                                # Muestra solo la lista de grupos
+cat /etc/passwd | grep almeris                # Verifica existencia del usuario en sistema
+cat /etc/group | grep wheel                   # Muestra miembros del grupo wheel
+3. PASO A PASO SERVICIO DE RED NFS (ORDEN OBLIGATORIO):
+mount /dev/sr0 /mnt/disc                      # 1. Verificar ISO montada
+dnf install -y nfs-utils                      # 2. Instalar paquete de soporte NFS
+mkdir -p /G33                                 # 3. Crear directorio a compartir
+chmod -R 777 /G33                             # 4. Conceder permisos de red
+echo "/G33 192.168.1.0/24(rw,sync,no_subtree_check)" >> /etc/exports  # 5. Definir exportación
+exportfs -ar                                  # 6. Aplicar reglas de exportación
+systemctl enable --now nfs-server             # 7. Iniciar y activar servicio
+4. RESOLUCIÓN DE ERRORES EN USUARIOS Y SERVICIOS:
+* Error "usermod: group does not exist": Intentaste asignar un usuario a un grupo no creado. REGLA: Ejecutar siempre 'groupadd ' antes de 'usermod'.
+* Error "bash: exportfs: command not found": No se instaló 'nfs-utils'. REGLA: Montar la ISO e instalar con 'dnf install -y nfs-utils' antes de exportar.
+
+
+
+---
+
+## PRÁCTICA 4: PERMISOS DE ARCHIVOS, EDITORES Y ESTADO LIMPIO
+
+1. ESTRUCTURA Y PERMISOS OCTALES:
+mkdir materia
+vi materia/estudiante.almeris                 # Crear y editar archivo
+chmod 700 materia/estudiante.almeris          # Solo propietario: rwx------
+chmod 070 materia/estudiante.almeris          # Solo grupo:       ---rwx---
+chmod 007 materia/estudiante.almeris          # Solo otros:       ------rwx
+chmod 777 materia/estudiante.almeris          # Todos:            rwxrwxrwx
+2. COPIA Y ELIMINACIÓN RECURSIVA:
+mkdir materia2
+cp materia/estudiante.almeris materia2/       # Copiar archivo guardando datos
+rm -rf materia                                # Borrar carpeta y contenido sin confirmar
+3. CONTROLES RÁPIDOS DE EDITORES DE TEXTO:
+* Editor VI / VIM:
+* Tecla 'i' : Entrar a modo edición (-- INSERT --)
+* Tecla 'Esc' : Salir de modo edición
+* ':wq' + Enter : Guardar y salir
+* ':q!' + Enter : Salir sin guardar cambios
+* ':w' + Enter : Guardar sin salir
+
+
+* Editor NANO:
+* Ctrl + O + Enter : Guardar cambios
+* Ctrl + X : Salir del editor
+
+
+
+
+4. PROCEDIMIENTO PARA DEJAR LA VM LIMPIA "DE FÁBRICA" (PARA REVISIÓN):
+* Desmontar puntos de prueba: umount /mnt/disc 2>/dev/null
+* Borrar directorio de prueba: rmdir /mnt/disc 2>/dev/null
+* Borrar historial de terminal: history -c && history -w
+* Limpiar pantalla y apagar: clear && poweroff
+================================================================================
