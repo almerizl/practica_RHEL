@@ -123,3 +123,220 @@ systemctl enable --now keepalived
 
 # Verificar el estado correcto del servicio de respaldo:
 systemctl status keepalived
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ================================================================================
+GUÍA COMPLETA Y BITÁCORA DE LABORATORIO - MÓDULO V (RHEL 9/10)
+Cris Almeris Zanellato Lorenzo | Matrícula: 2025-2285 | Docente: Adrián Alcántara
+
+---
+
+## PRÁCTICA 1: SINCRONIZACIÓN AUTOMATIZADA DE CARPETAS CON RSYNC Y CRON
+
+1. CONFIGURACIÓN EN EL SERVIDOR PRIMARIO (MÁQUINA 1):
+# A. Crear directorio y generar 100 archivos de prueba:
+
+
+mkdir -p /root/datos_sincro
+touch /root/datos_sincro/archivo{1..100}.txt
+# B. Crear el script de sincronización automatizado:
+
+
+cat << 'EOF' > /root/sincronizar.sh
+#!/bin/bash
+rsync -avz --delete /root/datos_sincro/ alzzzzzc@192.168.124.133:/home/alzzzzzc/datos_sincro/
+EOF
+# C. Otorgar permisos de ejecución:
+
+
+chmod +x /root/sincronizar.sh
+# D. Programar ejecución en el planificador (crontab):
+
+
+crontab -e
+# Agregar la siguiente regla dentro del editor de cron:
+
+
+# * * * * * /root/sincronizar.sh > /dev/null 2>&1
+
+
+# E. Generar archivo adicional para probar la sincronización automática:
+
+
+touch /root/datos_sincro/archivo_prueba_cron.txt
+2. COMPROBACIÓN EN EL SERVIDOR SECUNDARIO (MÁQUINA 2):
+# Esperar 1 minuto a que venza el ciclo de cron y verificar transferencia:
+
+
+ls /home/alzzzzzc/datos_sincro/
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 1:
+* `rsync` pide contraseña y detiene el proceso de `cron`: `cron` no puede ingresar contraseñas interactivas. Se DEBE configurar autenticación SSH por llaves públicas entre la Máquina 1 y la Máquina 2 (`ssh-copy-id alzzzzzc@192.168.124.133`).
+* Error `rsync: command not found`: El paquete `rsync` no está instalado. Ejecuta `dnf install -y rsync` en ambos nodos con la ISO montada.
+* Error de permisos en la Máquina 2: Asegúrate de que la carpeta de destino `/home/alzzzzzc/datos_sincro/` tenga permisos de escritura para el usuario `alzzzzzc` (`chmod 755 /home/alzzzzzc/datos_sincro/`).
+
+
+
+---
+
+## PRÁCTICA 2: ALTA DISPONIBILIDAD CON PACEMAKER Y COROSYNC
+
+1. CONFIGURACIÓN INICIAL EN AMBOS NODOS (MÁQUINA 1 Y MÁQUINA 2):
+# A. Instalar paquetes de cluster (si no están instalados):
+
+
+dnf install -y pcs pacemaker corosync fence-agents-all
+# B. Establecer la misma contraseña para el usuario administrativo 'hacluster':
+
+
+passwd hacluster
+# C. Habilitar e iniciar el demonio de configuración de clúster:
+
+
+systemctl enable --now pcsd
+2. CREACIÓN Y CONFIGURACIÓN DEL CLÚSTER (EJECUTAR SOLO EN MÁQUINA 1):
+# A. Autenticar nodos del clúster:
+
+
+pcs host auth nodo1 nodo2 -u hacluster
+# B. Crear y configurar la topología del clúster:
+
+
+pcs cluster setup mi_cluster nodo1 nodo2 --force
+# C. Iniciar y habilitar servicios en toda la red:
+
+
+pcs cluster start --all
+pcs cluster enable --all
+# D. Ajustar propiedades (Deshabilitar STONITH e ignorar Quórum para 2 nodos):
+
+
+pcs property set stonith-enabled=false
+pcs property set no-quorum-policy=ignore
+# E. Crear el recurso de IP Flotante (VIP):
+
+
+pcs resource create vip_cluster ocf:heartbeat:IPaddr2 ip=192.168.124.150 cidr_netmask=24 op monitor interval=30s
+3. COMANDOS DE VERIFICACIÓN Y ESTADO:
+pcs status                                   # Muestra el estado activo de los nodos y la VIP
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 2:
+* Error en `pcs host auth` (Autenticación fallida): La contraseña del usuario `hacluster` no coincide entre ambos nodos o el servicio `pcsd` no está corriendo en el nodo secundario. Revisa `systemctl status pcsd` en la Máquina 2.
+* Error `Unable to resolve nodo1 / nodo2`: Los nombres de host no están registrados en la red. Agrega las direcciones IP y nombres al archivo `/etc/hosts` en ambos nodos (`192.168.124.x nodo1`, `192.168.124.y nodo2`).
+* Recurso VIP en estado `STOPPED` o `FAILED`: Ocurre si no se deshabilitó STONITH. Confirma ejecutando `pcs property set stonith-enabled=false` y revisa con `pcs status`.
+
+
+
+---
+
+## PRÁCTICA 3: ALTA DISPONIBILIDAD WEB Y CONMUTACIÓN DE ERROR CON KEEPALIVED
+
+1. PREPARACIÓN DE PÁGINAS WEB EN AMBOS SERVIDORES:
+# En Máquina 1:
+
+
+echo "Bienvenidos a: Server 1" > /var/www/html/sitio80/index.html
+echo "Bienvenidos a: Server 1" > /var/www/html/sitio8080/index.html
+systemctl restart httpd
+# En Máquina 2:
+
+
+echo "Bienvenidos a: Server 2" > /var/www/html/sitio80/index.html
+echo "Bienvenidos a: Server 2" > /var/www/html/sitio8080/index.html
+systemctl restart httpd
+2. CONFIGURACIÓN DE KEEPALIVED EN MÁQUINA 1 (MODO MASTER - IP: 192.168.124.180):
+dnf install -y keepalived
+cat << 'EOF' > /etc/keepalived/keepalived.conf
+global_defs {
+router_id nodo1
+}
+vrrp_instance VI_1 {
+state MASTER
+interface ens160
+virtual_router_id 51
+priority 100
+advert_int 1
+authentication {
+auth_type PASS
+auth_pass 1234
+}
+virtual_ipaddress {
+192.168.124.180/24
+}
+}
+EOF
+systemctl enable --now keepalived
+3. CONFIGURACIÓN DE KEEPALIVED EN MÁQUINA 2 (MODO BACKUP - IP: 192.168.124.180):
+dnf install -y keepalived
+cat << 'EOF' > /etc/keepalived/keepalived.conf
+global_defs {
+router_id nodo2
+}
+vrrp_instance VI_1 {
+state BACKUP
+interface ens192
+virtual_router_id 51
+priority 90
+advert_int 1
+authentication {
+auth_type PASS
+auth_pass 1234
+}
+virtual_ipaddress {
+192.168.124.180/24
+}
+}
+EOF
+systemctl enable --now keepalived
+4. VERIFICACIÓN Y PRUEBA DE CONMUTACIÓN (FAILOVER):
+# A. Verificar asignación de IP flotante en el nodo MASTER (Máquina 1):
+
+
+ip addr show ens160                           # Debe mostrar la IP secundaria 192.168.124.180/24
+# B. Prueba de conmutación (Simular caída de Máquina 1):
+
+
+systemctl stop keepalived                    # Apagar el servicio en el MASTER
+# C. Comprobar en el nodo BACKUP (Máquina 2) que asumió la IP flotante:
+
+
+ip addr show ens192                           # Ahora debe mostrar la IP 192.168.124.180/24
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 3:
+* Ambos nodos asumen la IP flotante al mismo tiempo (Split-Brain / Conflicto VRRP): El firewall está bloqueando el protocolo VRRP entre ambos equipos. Solución: En ambos nodos ejecuta `firewall-cmd --add-protocol=vrrp --permanent && firewall-cmd --reload`.
+* Error `Interface ens160 / ens192 does not exist`: La tarjeta de red se llama diferente en cada máquina. Ejecuta `ip addr` en cada sistema para verificar los nombres exactos y actualízalos en sus respectivos archivos `keepalived.conf`.
+* No responde la página web al consultar la IP flotante (`192.168.124.180`): Confirma que el puerto 80/tcp esté abierto en el firewall de RHEL (`firewall-cmd --add-service=http --permanent && firewall-cmd --reload`) y que Apache (`httpd`) esté activo.
+
+
+
+---
+
+## LIMPIEZA Y RESTAURACIÓN RÁPIDA (PARA EVALUACIÓN LIMPIA)
+
+# pcs cluster stop --all 2>/dev/null
+systemctl stop keepalived 2>/dev/null
+crontab -r 2>/dev/null
+history -c && history -w
+clear
+
