@@ -230,3 +230,257 @@ PASOS REALIZADOS EN CLIENTE WINDOWS:
 4. Reiniciar la máquina Windows y validar el inicio de sesión con el usuario del dominio:
     Dominio: SO3\Administrator
 ================================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ================================================================================
+GUÍA COMPLETA Y BITÁCORA DE LABORATORIO - MÓDULO VII (RHEL 9/10)
+Cris Almeris Zanellato Lorenzo | Matrícula: 2025-2285 | Docente: Adrián Alcántara
+
+---
+
+## PRÁCTICA 1: SERVIDOR NFS (nodo1) Y CLIENTE CON AUTOMONTAJE (nodo2)
+
+1. CONFIGURACIÓN EN EL SERVIDOR (nodo1):
+# A. Crear directorio y generar los 100 archivos requeridos:
+
+
+mkdir -p /OS3
+touch /OS3/Adrian{1..100}.txt
+chmod -R 777 /OS3
+chown -R nobody:nobody /OS3
+# B. Definir la exportación en /etc/exports:
+
+
+cat << 'EOF' > /etc/exports
+/OS3    192.168.124.0/24(rw,sync,no_subtree_check)
+EOF
+exportfs -arv
+# C. Configurar reglas de cortafuegos y levantar servicios:
+
+
+firewall-cmd --permanent --add-service=nfs
+firewall-cmd --permanent --add-service=rpc-bind
+firewall-cmd --permanent --add-service=mountd
+firewall-cmd --reload
+systemctl enable --now nfs-server rpcbind
+systemctl restart nfs-server
+# D. Verificación en el servidor:
+
+
+exportfs -v
+2. CONFIGURACIÓN EN EL CLIENTE (nodo2):
+# A. Crear punto de montaje y consultar recurso compartido:
+
+
+mkdir -p /mnt/OS3_cliente
+showmount -e 192.168.124.10
+# B. Montaje manual (Versión 3 de NFS):
+
+
+mount -t nfs -o vers=3 192.168.124.10:/OS3 /mnt/OS3_cliente
+ls /mnt/OS3_cliente
+# C. Automontaje persistente en /etc/fstab:
+
+
+echo "192.168.124.10:/OS3   /mnt/OS3_cliente   nfs   defaults,vers=3,_netdev   0   0" >> /etc/fstab
+# D. Verificación final de montaje:
+
+
+mount -a
+df -h /mnt/OS3_cliente
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 1:
+* Error `showmount: command not found` en el cliente: Instala los clientes NFS ejecutando `dnf install -y nfs-utils`.
+* Error `clnt_create: RPC: Program not registered` o timeout en el cliente: Revisa que el servicio `rpcbind` y `nfs-server` estén activos en el servidor, o que falten los servicios `rpc-bind` y `mountd` en el firewall (`firewall-cmd --permanent --add-service=mountd`).
+* El cliente se congela al arrancar si el servidor está apagado: Confirma que la entrada en `/etc/fstab` contenga el parámetro `_netdev` para esperar a que la red esté arriba antes de intentar montar el directorio.
+
+
+
+---
+
+## PRÁCTICA 2: SERVIDOR DE ARCHIVOS SAMBA (COMPATIBLE CON WINDOWS)
+
+1. CONFIGURACIÓN EN EL SERVIDOR (nodo1):
+# A. Instalación de Samba y preparación de directorios:
+
+
+dnf install samba samba-client samba-common -y
+systemctl enable --now smb nmb
+mkdir -p /srv/samba/cris
+touch /srv/samba/cris/Cris{1..100}.txt
+chmod -R 777 /srv/samba/cris
+chown -R nobody:nobody /srv/samba/cris
+# B. Aplicar contexto de SELinux para Samba:
+
+
+chcon -t samba_share_t /srv/samba/cris
+# C. Configurar cortafuegos:
+
+
+firewall-cmd --permanent --add-service=samba
+firewall-cmd --reload
+# D. Agregar el bloque del recurso compartido en /etc/samba/smb.conf:
+
+
+cat << 'EOF' >> /etc/samba/smb.conf
+[cris]
+path = /srv/samba/cris
+browsable = yes
+writable = yes
+guest ok = yes
+read only = no
+EOF
+# E. Crear grupo, usuario del sistema y credencial Samba:
+
+
+groupadd samba_users
+useradd -m cris
+usermod -aG samba_users cris
+smbpasswd -a cris                     # Asignar contraseña de acceso a Samba
+systemctl restart smb nmb
+2. COMANDOS DE COMPROBACIÓN Y ACCESO CLIENTE:
+# En el Servidor Linux:
+
+
+groups cris
+testparm                             # Valida que la sintaxis de smb.conf esté libre de errores
+# Desde el Cliente Windows:
+
+
+# 1. Presionar Win + R y escribir: \192.168.124.10\cris
+
+
+# 2. Autenticarse con: Usuario: cris | Contraseña: la definida en smbpasswd.
+
+
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 2:
+* Windows solicita credenciales pero da "Acceso denegado" tras escribirlas: La contraseña de Samba es independiente a la del sistema Linux. Asegúrate de haber ejecutado `smbpasswd -a cris` y no solo `passwd cris`.
+* Windows no puede abrir la carpeta compartida: SELinux está bloqueando el directorio. Confirma haber corrido `chcon -t samba_share_t /srv/samba/cris` o pon SELinux temporalmente en modo permisivo con `setenforce 0`.
+* Error en `testparm`: Si marca errores de sintaxis, revisa que los corchetes `[cris]` no tengan espacios extra y que no falten comillas o rutas mal escritas en `path`.
+
+
+
+---
+
+## PRÁCTICA 3: CONTROLADOR DE DOMINIO SAMBA 4 (AD DC) Y UNIÓN DE CLIENTE WINDOWS
+
+1. CONFIGURACIÓN DEL HOSTNAME Y RED EN EL SERVIDOR (nodo1):
+hostnamectl set-hostname so3.inet
+echo "192.168.124.10 so3.inet inet" >> /etc/hosts
+2. DESCARGA, DEPENDENCIAS Y COMPILACIÓN DE SAMBA 4:
+mkdir -p /root/samba_build && cd /root/samba_build
+wget [https://download.samba.org/pub/samba/stable/samba-4.16.2.tar.gz](https://download.samba.org/pub/samba/stable/samba-4.16.2.tar.gz)
+tar -zxvf samba-4.16.2.tar.gz
+cd samba-4.16.2
+dnf install epel-release -y
+dnf config-manager --set-enabled crb
+dnf install gcc make python3-devel gnutls-devel docbook-style-xsl libacl-devel openldap-devel bind-utils -y
+./configure
+make -j2
+make -j2 install
+# Configurar variables de entorno PATH:
+
+
+echo "export PATH=/usr/local/samba/bin:/usr/local/samba/sbin:$PATH" >> /etc/profile
+source /etc/profile
+3. APROVISIONAMIENTO E INICIO DE SAMBA AD DC:
+samba-tool domain provision 
+--realm=SO3.INET 
+--domain=SO3 
+--server-role=dc 
+--dns-backend=SAMBA_INTERNAL
+/usr/local/samba/sbin/samba
+4. CONFIGURACIÓN DE REGLAS DE FIREWALL (IPTABLES):
+systemctl stop firewalld
+systemctl disable firewalld
+dnf install iptables-services -y
+systemctl enable --now iptables
+iptables -A INPUT -p tcp -m multiport --dports 53,88,135,139,389,445,464,636,3268,3269 -j ACCEPT
+iptables -A INPUT -p udp -m multiport --dports 53,88,123,137,138,389,464 -j ACCEPT
+service iptables save
+5. PASOS Y UNIÓN EN EL CLIENTE WINDOWS:
+# A. Red TCP/IPv4 en Windows:
+
+
+# - Servidor DNS Preferido: 192.168.124.10 (IP del Controlador de Dominio)
+
+
+# - Servidor DNS Alternativo: 8.8.8.8
+
+
+# B. En CMD de Windows probar conectividad de Dominio:
+
+
+ping so3.inet
+# C. Unirse al Dominio Active Directory:
+
+
+# - Configuración -> Acerca de -> Configuración avanzada del sistema -> Nombre de equipo -> Cambiar.
+
+
+# - Seleccionar: Miembro del dominio -> Nombre: so3.inet
+
+
+# - Autenticación: Usuario: Administrator | Contraseña: la creada en el provisionamiento.
+
+
+# - Reiniciar la máquina Windows e iniciar sesión con: SO3\Administrator
+
+
+6. VERIFICACIONES EN EL CONTROLADOR DE DOMINIO LINUX:
+host -t SRV _ldap._tcp.so3.inet
+host -t SRV _kerberos._udp.so3.inet
+ping so3.inet
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 3:
+* Windows dice "No se pudo encontrar un controlador de dominio para el dominio so3.inet": El DNS de Windows NO está apuntando a la IP de Linux (`192.168.124.10`). Cambia el DNS en Windows y ejecuta `ipconfig /flushdns` en CMD.
+* Error `samba-tool: command not found` tras compilar: Ejecuta `export PATH=/usr/local/samba/bin:/usr/local/samba/sbin:$PATH` para cargar los binarios recién compilados en la sesión actual.
+* Los registros DNS Kerberos o LDAP fallan en el servidor (`host -t SRV ...` retoma timeout): El binario `/usr/local/samba/sbin/samba` no está ejecutándose. Confirma que no haya instancias de `smbd` o `named` interfiriendo y levántalo directamente con `/usr/local/samba/sbin/samba`.
+
+
+
+---
+
+## LIMPIEZA Y ESTADO LIMPIO (DE FÁBRICA / EVALUACIÓN)
+
+# pkill samba 2>/dev/null
+systemctl stop smb nmb nfs-server
+history -c && history -w
+clear
