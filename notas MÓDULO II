@@ -1,0 +1,126 @@
+MÓDULO II
+Práctica 1 — Gestión de paquetes (dnf/yum)
+1. Actualizar repositorios y enumerar los repos en uso
+sudo dnf update -y
+sudo dnf upgrade -y
+# Enumerar repositorios activos
+dnf repolist
+dnf repolist all
+cat /etc/yum.repos.d/*.repo
+2. Buscar la herramienta en el caché de repositorios
+dnf search bashtop
+dnf list --available | grep -i bashtop
+dnf provides bashtop
+3. Instalar "Bashtop" (si no está en repos oficiales, agregar repo/EPEL)
+# Habilitar EPEL (suele traer herramientas de monitoreo extra)
+sudo dnf install -y epel-release
+sudo dnf update -y
+# Intentar instalar
+sudo dnf install -y bashtop
+# Si no existe en dnf, instalar vía pip (alternativa real y funcional)
+sudo dnf install -y python3-pip
+sudo pip3 install bashtop
+# Ejecutar
+bashtop
+Nota: si se usa pip, "agregar al repositorio local" se traduce a mantenerlo documentado como paquete
+pip instalado globalmente; si el profesor exige repo dnf, se puede crear un repositorio local con
+createrepo_c apuntando a un .rpm descargado manualmente.
+4. Desinstalar la herramienta y sus archivos de configuración
+# Si se instaló con dnf
+sudo dnf remove -y bashtop
+sudo rm -rf /etc/bashtop ~/.config/bashtop
+# Si se instaló con pip
+sudo pip3 uninstall -y bashtop
+rm -rf ~/.config/bashtop
+5. Eliminar dependencias huérfanas
+sudo dnf autoremove -y
+sudo dnf clean all
+Página 7 de 43
+Verificación:
+rpm -q bashtop # debe decir "package not installed" tras desinstalar
+dnf list installed | grep -i bashtop
+dnf repolist -v
+Qué hacer si falla:
+No match for argument → repositorio no tiene el paquete; habilitar EPEL o usar pip como
+alternativa.
+dnf muy lento / no conecta → revisar red ( ping 8.8.8.8 ) y DNS; revisar /etc/resolv.conf .
+Conflictos de dependencias → sudo dnf install -y --allowerasing bashtop
+Práctica 2 — Cron y at
+1. Cron: actualizar el sistema todas las tardes a las 11 p.m.
+sudo crontab -e
+# Agregar la línea (23:00 todos los días):
+0 23 * * * /usr/bin/dnf update -y >> /var/log/cron_update.log 2>&1
+2. Reiniciar la máquina todos los domingos a las 3 a.m.
+sudo crontab -e
+# Domingo = 0 (o 7)
+0 3 * * 0 /usr/sbin/shutdown -r now
+3. Tarea con "at": borrar contenido de /tmp en 1 minuto
+# Instalar el servicio at si no está
+sudo dnf install -y at
+sudo systemctl enable --now atd
+# Mostrar contenido ANTES
+ls /tmp
+# Programar la tarea
+echo "rm -rf /tmp/*" | at now + 1 minute
+# Ver la cola de tareas at pendientes
+atq
+# Esperar 1 minuto y luego mostrar contenido DESPUÉS
+ls /tmp
+Verificación:
+sudo crontab -l
+systemctl status crond
+systemctl status atd
+atq
+•
+•
+•
+Página 8 de 43
+Qué hacer si falla:
+Cron no ejecuta → verificar que el servicio esté activo: sudo systemctl enable --now crond
+at: command not found → sudo dnf install -y at && sudo systemctl enable --now atd
+Permisos denegados en crontab → asegurarse de usar sudo crontab -e para tareas de sistema, o
+revisar /etc/cron.allow / /etc/cron.deny .
+Práctica 3 — Discos, particiones ext4 y montaje
+1. Agregar disco de 20GB en el hipervisor
+Apagar la VM → Configuración → Almacenamiento → Agregar disco duro → Crear nuevo disco de 20 GB →
+Encender la VM.
+2. Formatear como ext4 y montar
+# Identificar el nuevo disco
+sudo lsblk
+sudo fdisk -l
+# Crear partición (asumiendo /dev/sdb)
+sudo fdisk /dev/sdb
+# dentro de fdisk: n (nueva) -> p (primaria) -> 1 -> Enter -> Enter -> w (guardar)
+# Formatear como ext4
+sudo mkfs.ext4 /dev/sdb1
+# Crear carpeta en el escritorio y montar
+mkdir -p ~/Desktop/discomontado
+sudo mount /dev/sdb1 ~/Desktop/discomontado
+sudo chown $USER:$USER ~/Desktop/discomontado
+3. Crear el archivo dentro
+cd ~/Desktop/discomontado
+touch AdrianAlcantara.txt
+ls -l
+4. Desmontar y volver a montar en /mnt
+cd ~
+sudo umount ~/Desktop/discomontado
+sudo mount /dev/sdb1 /mnt
+5. Comprobar que el archivo sigue ahí
+ls -l /mnt
+cat /mnt/AdrianAlcantara.txt
+Para que el montaje sea persistente tras reinicio, agregar en /etc/fstab :
+UUID=$(sudo blkid -s UUID -o value /dev/sdb1) /mnt ext4 defaults 0 2
+•
+•
+•
+Página 9 de 43
+Verificación:
+df -h | grep sdb1
+mount | grep sdb1
+lsblk -f
+Qué hacer si falla:
+mount: unknown filesystem type → confirmar que se formateó con mkfs.ext4 antes de montar.
+umount: target is busy → salir del directorio primero ( cd ~ ) y reintentar, o usar sudo umount -
+l /mnt
+Disco no aparece con lsblk → verificar que quedó atachado al controlador SATA correcto en el
+hipervisor y reiniciar la VM.
