@@ -1,0 +1,141 @@
+MÓDULO VII
+Requiere: VM server (Linux), VM cliente Linux, VM Windows 10. Crear snapshot antes de empezar.
+Práctica 1 — NFS entre Linux
+1. Instalar NFS en el servidor y crear directorio con 100 archivos
+sudo dnf install -y nfs-utils
+sudo mkdir -p /OS3
+sudo bash -c 'for i in $(seq 1 100); do touch /OS3/Adrian$i.txt; done'
+ls /OS3 | wc -l
+2. Asignar permisos
+sudo chown -R nobody:nobody /OS3
+sudo chmod -R 755 /OS3
+3. Configurar exports
+Ruta: /etc/exports
+sudo nano /etc/exports
+/OS3 192.168.1.0/24(rw,sync,no_subtree_check,no_root_squash)
+sudo exportfs -arv
+sudo systemctl enable --now nfs-server
+sudo firewall-cmd --permanent --add-service=nfs
+sudo firewall-cmd --permanent --add-service=rpc-bind
+sudo firewall-cmd --permanent --add-service=mountd
+sudo firewall-cmd --reload
+4. Instalar cliente NFS y montar
+# En la VM cliente Linux
+sudo dnf install -y nfs-utils
+sudo mkdir -p /mnt/OS3cliente
+sudo mount 192.168.1.50:/OS3 /mnt/OS3cliente
+ls /mnt/OS3cliente | wc -l
+5. Montaje persistente en /etc/fstab
+sudo nano /etc/fstab
+192.168.1.50:/OS3 /mnt/OS3cliente nfs defaults 0 0
+sudo mount -a
+sudo reboot
+# Tras reiniciar:
+ls /mnt/OS3cliente | wc -l
+mount | grep OS3
+Página 25 de 43
+Verificación:
+showmount -e 192.168.1.50
+df -h | grep OS3
+mount | grep nfs
+Qué hacer si falla:
+mount.nfs: access denied by server → revisar la sintaxis exacta en /etc/exports (sin espacio
+entre IP y paréntesis) y reejecutar exportfs -arv .
+No monta tras reiniciar → confirmar que rpcbind y nfs-server estén habilitados con systemctl
+enable , no solo start .
+SELinux bloquea → sudo setsebool -P nfs_export_all_rw 1
+Firewall bloquea → confirmar los tres servicios: nfs , rpc-bind , mountd .
+•
+•
+•
+•
+Página 26 de 43
+Práctica 2 — Fileserver Samba compatible con Windows
+1. Instalar y habilitar Samba
+sudo dnf install -y samba samba-client samba-common
+sudo systemctl enable --now smb nmb
+sudo firewall-cmd --permanent --add-service=samba
+sudo firewall-cmd --reload
+2. Crear carpeta compartida, usuario, grupo y permisos
+sudo mkdir -p /samba/compartida
+sudo groupadd sambagrupo
+sudo useradd -M -s /sbin/nologin -G sambagrupo sambauser
+sudo smbpasswd -a sambauser
+sudo chown -R root:sambagrupo /samba/compartida
+sudo chmod -R 2770 /samba/compartida
+sudo chcon -R -t samba_share_t /samba/compartida
+3. Configurar el recurso compartido
+Ruta: /etc/samba/smb.conf
+sudo nano /etc/samba/smb.conf
+[compartida]
+path = /samba/compartida
+valid users = @sambagrupo
+writable = yes
+browsable = yes
+create mask = 0660
+directory mask = 2770
+sudo testparm
+sudo systemctl restart smb nmb
+4. Crear los 100 archivos "adrianN"
+sudo bash -c 'for i in $(seq 1 100); do touch /samba/compartida/adrian$i; done'
+sudo chown -R root:sambagrupo /samba/compartida
+5. Mapear unidad en Windows
+En Windows: Este equipo → Mapear unidad de red → Carpeta: \\192.168.1.50\compartida → marcar
+"Conectar con otras credenciales" → usuario sambauser .
+6. Editar adrian99 desde Windows y validar en Linux
+Abrir adrian99 desde la unidad mapeada, escribir "el zumzum de la carabela", guardar.
+# En el servidor Linux
+cat /samba/compartida/adrian99
+Página 27 de 43
+Verificación:
+smbstatus
+testparm -s
+pdbedit -L
+Qué hacer si falla:
+Windows no puede conectar → verificar SELinux con chcon -t samba_share_t y booleano
+setsebool -P samba_enable_home_dirs on si aplica.
+No pide usuario/contraseña o falla auth → confirmar que se ejecutó smbpasswd -a sambauser
+(contraseña Samba es independiente de la de Linux).
+No aparece el recurso al navegar la red → revisar que nmb esté activo y el firewall permita el
+servicio samba completo (incluye NetBIOS).
+Práctica 3 — Controlador de dominio con Samba4
+1. Crear usuario lanegracubana en Linux
+sudo useradd -m lanegracubana
+echo "lanegracubana:2025-2285" | sudo chpasswd
+sudo smbpasswd -a lanegracubana
+# Al pedir la contraseña Samba, usar la matrícula: 2025-2285
+2. Instalar Samba4 AD DC
+sudo dnf install -y samba-dc krb5-workstation
+sudo systemctl stop smb nmb
+sudo systemctl disable smb nmb
+3. Aprovisionar el dominio SO3.inet
+sudo mv /etc/samba/smb.conf /etc/samba/smb.conf.bak
+sudo samba-tool domain provision \
+--realm=SO3.INET \
+--domain=SO3 \
+--server-role=dc \
+--dns-backend=SAMBA_INTERNAL \
+--adminpass='Teletubies123$'
+sudo systemctl enable --now samba
+# Configurar DNS del propio servidor para que apunte a sí mismo
+sudo nmcli connection modify enp0s3 ipv4.dns "127.0.0.1"
+sudo nmcli connection up enp0s3
+4. Agregar la VM Windows al dominio
+En Windows: Panel de Control → Sistema → Configuración avanzada → Cambiar → Miembro de: dominio →
+SO3.inet → autenticar con lanegracubana y su contraseña (matrícula 2025-2285) → reiniciar Windows.
+•
+•
+•
+Página 28 de 43
+Verificación:
+sudo samba-tool user list
+sudo samba-tool domain info 127.0.0.1
+host -t SRV _ldap._tcp.SO3.inet
+smbclient -L localhost -U%
+Qué hacer si falla:
+Windows no encuentra el dominio → confirmar que el DNS del cliente Windows apunte a la IP del
+servidor Samba4, no a 8.8.8.8.
+Error al aprovisionar (smb.conf existente) → renombrar/mover el smb.conf anterior antes de
+samba-tool domain provision .
+Kerberos falla → verificar hora sincronizada entre servidor y cliente (Samba4/Kerberos requiere
+reloj sincronizado, máx. 5 min de diferencia).
