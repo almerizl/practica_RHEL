@@ -1,0 +1,132 @@
+MÓDULO VIII
+Práctica 1 — Instalación y configuración de Docker
+1. Instalar Docker en RHEL desde cero
+sudo dnf install -y dnf-plugins-core
+sudo dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo systemctl enable --now docker
+sudo usermod -aG docker $(whoami)
+newgrp docker
+2. Descargar imagen de NGINX
+docker pull nginx
+3. Crear contenedor con puerto 8888→80 y volumen persistente
+mkdir -p /home/website
+docker run -d --name webserver \
+-p 8888:80 \
+-v /home/website:/usr/share/nginx/html \
+nginx
+4. Crear index.html con nombre y matrícula, copiarlo al volumen
+cat << 'EOF' > /home/website/index.html
+<h1>Cris - Matricula 2025-2285</h1>
+EOF
+# El volumen ya está montado, el archivo aparece automáticamente en el contenedor
+5. Ver la página
+curl http://127.0.0.1:8888
+# En navegador del host: http://127.0.0.1:8888
+Verificación:
+docker ps
+docker logs webserver
+docker exec webserver ls /usr/share/nginx/html
+sudo firewall-cmd --permanent --add-port=8888/tcp && sudo firewall-cmd --reload
+Qué hacer si falla:
+permission denied con el socket de Docker → confirmar que el usuario esté en el grupo docker y
+reloguear ( newgrp docker o cerrar sesión).
+No carga desde el navegador del host → abrir el puerto 8888 en firewalld del servidor.
+El index.html no aparece dentro del contenedor → confirmar la ruta EXACTA del volumen con
+docker inspect webserver , el bind mount debe ser /home/website:/usr/share/nginx/html .
+•
+•
+•
+Página 30 de 43
+Práctica 2 — Instalación de Portainer
+1. Descargar imagen y crear volumen
+docker volume create portainer_data
+docker pull portainer/portainer-ce:latest
+2. Crear contenedor mapeando todos los puertos internos
+docker run -d --name portainer \
+-p 8000:8000 -p 9443:9443 -p 9000:9000 \
+--restart=always \
+-v /var/run/docker.sock:/var/run/docker.sock \
+-v portainer_data:/data \
+portainer/portainer-ce:latest
+3. Acceder a la interfaz web
+Navegar a https://127.0.0.1:9443 , crear el usuario administrador inicial, y en "Environments" seleccionar
+"Get Started" / local para vincularse al Docker Engine del host (socket ya montado).
+4. Detener el contenedor de NGINX desde Portainer
+Containers → seleccionar webserver → botón Stop.
+# Confirmar por terminal también
+docker ps -a
+curl http://127.0.0.1:8888 # debe fallar tras detenerlo
+Verificación:
+docker ps -a
+docker port portainer
+sudo firewall-cmd --add-port={8000,9000,9443}/tcp --permanent && sudo firewall-cmd --reload
+Qué hacer si falla:
+No conecta al Docker Engine → confirmar que se montó el volumen /var/run/docker.sock:/var/
+run/docker.sock correctamente.
+No carga la interfaz HTTPS → probar con --insecure en el navegador (certificado autofirmado) o
+revisar el puerto real mapeado con docker port portainer .
+•
+•
+Página 31 de 43
+Práctica 3 — WordPress con Docker Compose
+Página 32 de 43
+1. Instalar Docker Compose
+# Si no vino con docker-ce, instalar el plugin:
+sudo dnf install -y docker-compose-plugin
+docker compose version
+2. Crear docker-compose.yml
+mkdir -p ~/wordpress && cd ~/wordpress
+nano docker-compose.yml
+version: '3.8'
+services:
+db:
+image: mysql:5.7
+container_name: wp_db
+restart: always
+environment:
+MYSQL_ROOT_PASSWORD: rootpass123
+MYSQL_DATABASE: wordpress
+MYSQL_USER: wpuser
+MYSQL_PASSWORD: wppass123
+volumes:
+- db_data:/var/lib/mysql
+wordpress:
+image: wordpress:latest
+container_name: wp_app
+depends_on:
+- db
+restart: always
+ports:
+- "8081:80"
+environment:
+WORDPRESS_DB_HOST: db:3306
+WORDPRESS_DB_USER: wpuser
+WORDPRESS_DB_PASSWORD: wppass123
+WORDPRESS_DB_NAME: wordpress
+volumes:
+- wp_data:/var/www/html
+volumes:
+db_data:
+wp_data:
+3. Desplegar los contenedores
+docker compose up -d
+docker compose ps
+4. Configurar WordPress desde el navegador
+sudo firewall-cmd --permanent --add-port=8081/tcp
+sudo firewall-cmd --reload
+Navegar a http://IP_DEL_SERVIDOR:8081 → elegir idioma → completar el formulario de instalación (título del
+sitio, usuario admin, contraseña, correo) → Instalar WordPress → iniciar sesión en el panel de
+administración.
+Página 33 de 43
+Verificación:
+docker compose logs wordpress --tail=30
+docker compose logs db --tail=30
+curl -I http://127.0.0.1:8081
+Qué hacer si falla:
+Error establishing database connection → confirmar que WORDPRESS_DB_HOST use el nombre
+del servicio ( db ) y no localhost/IP; ambos contenedores deben estar en la misma red de compose
+(automática por defecto).
+El contenedor db se reinicia en bucle → revisar docker compose logs db ; usualmente variables de
+entorno mal escritas o volumen corrupto ( docker compose down -v para limpiar y reintentar).
+Puerto 8081 no accesible desde el navegador del host → abrir el puerto en firewalld del servidor.
