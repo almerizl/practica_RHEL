@@ -144,3 +144,199 @@ lpstat -W completed
 # Comando final de monitoreo de archivos PDF procesados en el almacenamiento:
 ls -l /var/spool/cups-pdf/ANONYMOUS/
 ls -R /var/spool/cups-pdf/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ================================================================================
+GUÍA COMPLETA Y BITÁCORA DE LABORATORIO - MÓDULO IV (RHEL 9/10)
+Cris Almeris Zanellato Lorenzo | Matrícula: 2025-2285 | Docente: Adrián Alcántara
+
+---
+
+## PRÁCTICA 1: SERVIDOR WEB APACHE (httpd) EN PUERTOS 80 Y 8080
+
+1. INSTALACIÓN DE APACHE Y CREACIÓN DE DIRECTORIOS:
+mount /dev/cdrom /mnt/disc                    # OBLIGATORIO: Montar ISO primero
+dnf install httpd -y
+mkdir -p /var/www/html/puerto80
+mkdir -p /var/www/html/puerto8080
+2. CREACIÓN DE SITIOS WEB ESTÁTICOS:
+# Sitio Web Puerto 80:
+
+
+echo "Hola Mundo" > /var/www/html/puerto80/index.html
+# Sitio Web Puerto 8080:
+
+
+echo "Nombre: Cris Almeris Zanellato LorenzoMatricula: 2025-2285Materia: Sistemas Operativos 3" > /var/www/html/puerto8080/index.html
+3. CONFIGURACIÓN DE PUERTOS Y VIRTUAL HOSTS:
+# A. Verificar que /etc/httpd/conf/httpd.conf tenga la escucha de ambos puertos:
+
+
+# Listen 80
+
+
+# Listen 8080
+
+
+# B. Crear el archivo de Hosts Virtuales (Sin editar con nano):
+
+
+cat << 'EOF' > /etc/httpd/conf.d/vhosts.conf
+<VirtualHost *:80>
+DocumentRoot "/var/www/html/puerto80"
+
+<VirtualHost *:8080>
+DocumentRoot "/var/www/html/puerto8080"
+
+EOF
+4. FIREWALL Y ACTIVACIÓN DEL SERVICIO:
+firewall-cmd --zone=public --add-port=80/tcp --permanent
+firewall-cmd --zone=public --add-port=8080/tcp --permanent
+firewall-cmd --reload
+systemctl enable --now httpd
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 1:
+* Error al cargar la página en puerto 8080: SELinux puede estar bloqueando el puerto custom. Ejecuta `semanage port -a -t http_port_t -p tcp 8080` o ponlo temporalmente en permisivo con `setenforce 0`.
+* Error de sintaxis en Apache: Ejecuta `apachectl configtest` para verificar errores antes de reiniciar el servicio.
+* No instala `httpd`: Confirma que la ISO está montada en `/mnt/disc` y que `/etc/yum.repos.d/local.repo` está activo.
+
+
+
+---
+
+## PRÁCTICA 2: SERVIDOR DE CORREO POSTFIX (RELAY CON GMAIL)
+
+1. INSTALACIÓN DE DEPENDENCIAS Y AUTH SASL:
+dnf install postfix mailx cyrus-sasl-plain -y
+2. CONFIGURACIÓN DE CREDENCIALES (GMAIL):
+# Crear archivo con credenciales de la cuenta emisora:
+
+
+cat << 'EOF' > /etc/postfix/sasl_passwd
+[smtp.gmail.com]:587 almeriszanellato21@gmail.com:tus_nuevas_16_letras_aqui
+EOF
+chmod 600 /etc/postfix/sasl_passwd
+postmap lmdb:/etc/postfix/sasl_passwd         # Mapeo indexado LMDB para RHEL 10
+postsuper -d ALL                              # Limpieza profunda de colas con errores
+3. RECONFIGURACIÓN LIMPIA DE POSTFIX (/etc/postfix/main.cf):
+cat << 'EOF' > /etc/postfix/main.cf
+relayhost = [smtp.gmail.com]:587
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = lmdb:/etc/postfix/sasl_passwd
+smtp_sasl_security_options = noanonymous
+smtp_tls_security_level = encrypt
+inet_protocols = ipv4
+EOF
+systemctl restart postfix
+4. PRUEBA DE ENVÍO Y VERIFICACIÓN:
+echo "Nombre: Cris Almeris Zanellato Lorenzo - Matricula: 2025-2285" | mail -s "MambruSeFueALaGuerra" os3conadrian@gmail.com
+mailq                                         # VERIFICACIÓN: La cola debe quedar totalmente vacía (Mail queue is empty)
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 2:
+* El correo no sale y queda en cola (`mailq`): Gmail rechaza la contraseña normal. Se DEBE generar una **Contraseña de Aplicación de 16 letras** desde la seguridad de la cuenta de Google (con 2FA activo).
+* Error `authentication failed`: Revisa si tipeaste bien la contraseña de 16 caracteres en `/etc/postfix/sasl_passwd` y vuelve a ejecutar `postmap lmdb:/etc/postfix/sasl_passwd` y `systemctl restart postfix`.
+* Monitoreo de errores en vivo: Ejecuta `journalctl -u postfix -f` o consulta `/var/log/maillog` para ver la causa exacta de la falla.
+
+
+
+---
+
+## PRÁCTICA 3: SERVIDOR DE IMPRESIÓN CUPS (IMPRESORA VIRTUAL PDF)
+
+1. INSTALACIÓN Y PERMISOS DE SPOOL:
+dnf install cups cups-pdf -y
+# Configurar acceso para la red local (ej. 192.168.100.x):
+
+
+cat << 'EOF' > /etc/cups/cupsd.conf
+Port 631
+
+Order allow,deny
+Allow from 192.168.100.*
+
+<Location /admin>
+Order allow,deny
+Allow from 192.168.100.*
+
+EOF
+# Permisos de spool y SELinux:
+
+
+setenforce 0                                  # Desactivar restricciones de SELinux
+chmod 777 /var/spool/cups-pdf/ANONYMOUS/
+systemctl enable --now cups
+firewall-cmd --zone=public --add-port=631/tcp --permanent
+firewall-cmd --reload
+2. PASOS EN LA CONSOLA WEB DE CUPS (`[http://192.168.100.10:631/admin](http://192.168.100.10:631/admin)`):
+* Iniciar sesión con el usuario `root`.
+* Añadir impresora local tipo: `CUPS-PDF (Virtual PDF Printer)`.
+* Registrar nombre único de red: `Cups-PDF` (o `Virtual_PDF_Printer`) y marcar "Share This Printer".
+* Marca: `Generic` | Modelo: `Generic CUPS-PDF Printer (en)`.
+
+
+3. PASOS EN EL CLIENTE WINDOWS:
+* "Agregar impresora compartida por nombre".
+* URL IPP: `[http://192.168.100.10:631/printers/Cups-PDF](http://192.168.100.10:631/printers/Cups-PDF)`
+* Usar controlador genérico de texto (`Generic / MS Publisher`).
+
+
+4. PRUEBA Y COMANDOS DE VERIFICACIÓN LOCAL EN RHEL:
+lp -d Cups-PDF /etc/hostname
+lp -d Virtual_PDF_Printer /etc/hostname
+lpstat -p                                     # Ver estado de impresoras
+lpstat -W completed                           # Ver trabajos completados
+ls -l /var/spool/cups-pdf/ANONYMOUS/          # Confirmar generación de archivos PDF
+
+* QUÉ HACER SI ALGO FALLA EN LA PRÁCTICA 3:
+* No abre la interfaz web en puerto 631: Revisa la regla `Allow from 192.168.100.*` en `/etc/cups/cupsd.conf` para que coincida con el rango de la IP de tu PC física o usa `Allow from all`.
+* El trabajo se envía pero no genera el PDF: Verifica haber otorgado permisos `chmod 777 /var/spool/cups-pdf/ANONYMOUS/` y que SELinux esté en permisivo (`setenforce 0`).
+
+
+
+---
+
+## LIMPIEZA Y ESTADO LIMPIO (DE FÁBRICA / EVALUACIÓN)
+
+# systemctl stop httpd postfix cups
+history -c && history -w
+clear
