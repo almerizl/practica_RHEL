@@ -1,0 +1,133 @@
+MÓDULO V
+Requiere un segundo servidor (clonar la VM). En este módulo: server1 = 192.168.1.50, server2 =
+192.168.1.51 (ajustar a IPs reales del examen).
+Práctica 1 — Sincronización con Rsync
+1. Crear carpeta con 100 archivos en el servidor primario
+mkdir -p ~/carpeta_rsync
+cd ~/carpeta_rsync
+for i in $(seq 1 100); do touch archivo$i.txt; done
+ls | wc -l
+2. Copiar con rsync al servidor remoto
+sudo dnf install -y rsync
+# Instalar rsync también en el servidor remoto (server2)
+rsync -avz -e ssh ~/carpeta_rsync/ usuario@192.168.1.51:/home/usuario/carpeta_rsync/
+3. Script + crontab para sincronizar cada 1 minuto
+nano ~/sync.sh
+#!/bin/bash
+rsync -avz -e "ssh -o StrictHostKeyChecking=no" /home/$(whoami)/carpeta_rsync/
+usuario@192.168.1.51:/home/usuario/carpeta_rsync/
+chmod +x ~/sync.sh
+crontab -e
+* * * * * /home/usuario/sync.sh >> /home/usuario/sync.log 2>&1
+# Prueba: crear un archivo nuevo en el primario
+touch ~/carpeta_rsync/pruebacron.txt
+# Esperar 1 minuto, luego revisar en el servidor SECUNDARIO
+ls /home/usuario/carpeta_rsync/ | grep prueba
+Para que el cron corra sin pedir contraseña, configurar SSH sin passphrase entre server1 y server2 (ver
+Módulo III Práctica 3).
+Verificación:
+ssh usuario@192.168.1.51 "ls /home/usuario/carpeta_rsync | wc -l"
+crontab -l
+cat ~/sync.log
+Página 21 de 43
+Qué hacer si falla:
+rsync pide contraseña en cron (falla silenciosamente) → configurar llaves SSH sin passphrase
+entre ambos servidores.
+rsync: command not found en el remoto → sudo dnf install -y rsync en server2 también.
+Cron no ejecuta cada minuto → confirmar systemctl status crond y revisar /var/log/cron .
+Práctica 2 — Cluster de Alta Disponibilidad (Pacemaker + Corosync)
+1. Instalación en ambos nodos
+# En server1 y server2
+sudo dnf install -y pcs pacemaker corosync fence-agents-all
+sudo firewall-cmd --permanent --add-service=high-availability
+sudo firewall-cmd --reload
+sudo systemctl enable --now pcsd
+sudo passwd hacluster # definir la misma contraseña en ambos nodos
+2. Autenticar y crear el clúster (desde server1)
+sudo pcs host auth server1 server2 -u hacluster -p 'ContraseñaSegura'
+sudo pcs cluster setup mi_cluster server1 server2
+sudo pcs cluster start --all
+sudo pcs cluster enable --all
+sudo pcs property set stonith-enabled=false # en labs sin fencing real
+3. Configurar la IP flotante
+sudo pcs resource create IPflotante ocf:heartbeat:IPaddr2 \
+ip=192.168.1.60 cidr_netmask=24 op monitor interval=10s
+4. Pruebas: ping a la IP flotante y reinicios alternos
+ping 192.168.1.60
+sudo pcs status
+# Apagar el nodo activo y confirmar que la IP flotante migra
+sudo pcs cluster stop server1
+ping 192.168.1.60 # debe seguir respondiendo, ahora desde server2
+Verificación:
+sudo pcs status
+sudo pcs resource status
+sudo corosync-cfgtool -s
+Qué hacer si falla:
+El recurso IP queda en Stopped → revisar sudo pcs status para el motivo; suele ser stonith
+habilitado sin fencing configurado → sudo pcs property set stonith-enabled=false
+Nodos no se ven entre sí → confirmar que el puerto de corosync (UDP 5405) esté abierto: sudo
+firewall-cmd --add-service=high-availability --permanent
+pcs host auth falla → confirmar que hacluster tenga la misma contraseña en ambos nodos y
+que pcsd esté activo en ambos.
+•
+•
+•
+•
+•
+•
+Página 22 de 43
+Práctica 3 — Cluster HA HTTP con KeepAlived
+1. Instalar Apache y crear página identificadora en cada nodo
+# En server1
+sudo dnf install -y httpd
+echo "<h1>Server1</h1>" | sudo tee /var/www/html/index.html
+sudo systemctl enable --now httpd
+# En server2
+sudo dnf install -y httpd
+echo "<h1>Server2</h1>" | sudo tee /var/www/html/index.html
+sudo systemctl enable --now httpd
+2. Instalar y configurar KeepAlived (en ambos nodos)
+sudo dnf install -y keepalived
+sudo firewall-cmd --permanent --add-protocol=vrrp
+sudo firewall-cmd --reload
+En server1 (MASTER): /etc/keepalived/keepalived.conf
+vrrp_script chk_http {
+script "/usr/bin/curl -f http://localhost || exit 1"
+interval 2
+}
+vrrp_instance VI_1 {
+state MASTER
+interface enp0s3
+virtual_router_id 51
+priority 150
+advert_int 1
+authentication {
+auth_type PASS
+auth_pass claveHA
+}
+virtual_ipaddress {
+192.168.1.60/24
+}
+track_script {
+chk_http
+}
+}
+En server2 (BACKUP): mismo archivo pero state BACKUP y priority 100 .
+sudo systemctl enable --now keepalived
+3. Validar HA apagando un nodo
+curl http://192.168.1.60
+# Apagar Apache o el nodo MASTER
+sudo systemctl stop httpd # (en server1)
+curl http://192.168.1.60 # debe mostrar ahora "Server2"
+Página 23 de 43
+Verificación:
+ip a | grep 192.168.1.60
+sudo systemctl status keepalived
+sudo journalctl -u keepalived -n 30
+Qué hacer si falla:
+La IP virtual no aparece en ningún nodo → revisar que vrrp_script use una ruta válida a curl
+( which curl ) y que el firewall permita el protocolo VRRP.
+Ambos nodos se creen MASTER (split-brain) → confirmar que virtual_router_id coincide en
+ambos y que estén en la misma red/VLAN.
+No conmuta al apagar server1 → revisar journalctl -u keepalived en server2 para ver si recibe
+los anuncios VRRP.
