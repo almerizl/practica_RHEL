@@ -122,3 +122,4 @@ rm -rf materia                        # Eliminación recursiva y forzada de la c
 ls -l materia2/   # Comprueba los permisos (---rwx---) y la existencia del clon
 ls -l             # Comprueba que la carpeta 'materia' fue eliminada por completo
 ================================================================================
+
